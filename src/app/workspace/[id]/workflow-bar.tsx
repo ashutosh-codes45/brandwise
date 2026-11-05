@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { MemberRole } from "@/lib/auth/roles";
 import {
@@ -147,6 +148,14 @@ export function WorkflowBar({
           )}
         </div>
         <div className="flex flex-wrap gap-2">
+          {status === "approved" && (
+            <Link
+              className="rounded-lg border border-emerald-300 px-4 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-50"
+              href={`/workspace/${contentId}/export`}
+            >
+              Export
+            </Link>
+          )}
           {canSend && (
             <button
               className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
