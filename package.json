@@ -11,10 +11,14 @@
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.119.0",
+    "@tiptap/extension-link": "^3.32.2",
+    "@tiptap/react": "^3.32.2",
+    "@tiptap/starter-kit": "^3.32.2",
     "mammoth": "^1.13.0",
     "next": "16.4.5",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "sanitize-html": "^2.18.1",
     "unpdf": "^2.1.0"
   },
   "devDependencies": {
@@ -22,6 +26,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/sanitize-html": "^2.16.2",
     "eslint": "^9",
     "eslint-config-next": "16.4.5",
     "tailwindcss": "^4",

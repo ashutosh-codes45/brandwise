@@ -1,0 +1,716 @@
+"use client";
+
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+  type ChangeEvent,
+  type FormEvent,
+} from "react";
+import { useRouter } from "next/navigation";
+import { EditorContent, useEditor } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import Link from "@tiptap/extension-link";
+import Image from "next/image";
+import {
+  deleteContent,
+  getImageUrl,
+  saveContent,
+  uploadImage,
+} from "../actions";
+
+const platforms = [
+  "LinkedIn",
+  "X (Twitter)",
+  "Instagram",
+  "Facebook",
+  "Blog/Website",
+  "Email",
+] as const;
+
+type SectionType = "text" | "image";
+type ContentSection = {
+  id: string;
+  type: SectionType;
+  body: string | null;
+  image_path: string | null;
+  alt_text: string | null;
+  position: number;
+};
+type ContentData = {
+  id: string;
+  title: string;
+  status: string;
+  platforms: string[];
+  sections: ContentSection[];
+};
+
+const statusLabels: Record<string, string> = {
+  draft: "Draft",
+  in_review: "In review",
+  changes_requested: "Changes requested",
+  approved: "Approved",
+};
+
+export function ContentEditor({
+  content,
+  canEdit,
+}: {
+  content: ContentData;
+  canEdit: boolean;
+}) {
+  const router = useRouter();
+  const [title, setTitle] = useState(content.title);
+  const [selectedPlatforms, setSelectedPlatforms] = useState(
+    content.platforms
+  );
+  const [sections, setSections] = useState(content.sections);
+  const [savedSections, setSavedSections] = useState(content.sections);
+  const [dirty, setDirty] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const [feedbackIsError, setFeedbackIsError] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
+
+  const markDirty = useCallback(() => setDirty(true), []);
+  const imagePathKey = useMemo(
+    () =>
+      JSON.stringify(
+        sections
+          .filter(
+            (section) => section.type === "image" && section.image_path
+          )
+          .map((section) => [section.id, section.image_path])
+      ),
+    [sections]
+  );
+
+  useEffect(() => {
+    if (!canEdit || !dirty) {
+      return;
+    }
+
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    const confirmInternalNavigation = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+      const anchor = target.closest("a[href]");
+      if (!(anchor instanceof HTMLAnchorElement)) {
+        return;
+      }
+      const destination = new URL(anchor.href, window.location.href);
+      if (
+        destination.origin === window.location.origin &&
+        destination.pathname !== window.location.pathname &&
+        !window.confirm("You have unsaved changes. Leave without saving?")
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    document.addEventListener("click", confirmInternalNavigation, true);
+    return () => {
+      window.removeEventListener("beforeunload", warnBeforeUnload);
+      document.removeEventListener("click", confirmInternalNavigation, true);
+    };
+  }, [canEdit, dirty]);
+
+  useEffect(() => {
+    let active = true;
+    const imageSections = JSON.parse(imagePathKey) as [string, string][];
+
+    void Promise.all(
+      imageSections.map(async ([sectionId, imagePath]) => {
+        const result = await getImageUrl(content.id, imagePath);
+        if ("error" in result) {
+          setFeedback(result.error);
+          setFeedbackIsError(true);
+          return null;
+        }
+        return [sectionId, result.url] as const;
+      })
+    ).then((results) => {
+      if (active) {
+        setImageUrls((current) => ({
+          ...current,
+          ...Object.fromEntries(
+            results.filter(
+              (result): result is readonly [string, string] => result !== null
+            )
+          ),
+        }));
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [content.id, imagePathKey]);
+
+  function updateSection(id: string, change: Partial<ContentSection>) {
+    setSections((current) =>
+      current.map((section) =>
+        section.id === id ? { ...section, ...change } : section
+      )
+    );
+    markDirty();
+  }
+
+  function addSection(type: SectionType) {
+    setSections((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        type,
+        body: type === "text" ? "<p></p>" : null,
+        image_path: null,
+        alt_text: null,
+        position: current.length,
+      },
+    ]);
+    markDirty();
+  }
+
+  function moveSection(index: number, direction: -1 | 1) {
+    const destination = index + direction;
+    if (destination < 0 || destination >= sections.length) {
+      return;
+    }
+    const reordered = [...sections];
+    [reordered[index], reordered[destination]] = [
+      reordered[destination],
+      reordered[index],
+    ];
+    setSections(reordered);
+    markDirty();
+  }
+
+  function removeSection(sectionId: string) {
+    setSections((current) =>
+      current
+        .filter((section) => section.id !== sectionId)
+        .map((section, position) => ({ ...section, position }))
+    );
+    markDirty();
+  }
+
+  function changePlatform(platform: string, checked: boolean) {
+    setSelectedPlatforms((current) =>
+      checked
+        ? [...current, platform]
+        : current.filter((value) => value !== platform)
+    );
+    markDirty();
+  }
+
+  function handleSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFeedback("");
+    startTransition(async () => {
+      const result = await saveContent(
+        content.id,
+        title,
+        selectedPlatforms,
+        sections
+      );
+      if ("error" in result) {
+        setFeedback(result.error);
+        setFeedbackIsError(true);
+        return;
+      }
+      setDirty(false);
+      setSavedSections(sections);
+      setFeedback("Saved. A revision was added to the history.");
+      setFeedbackIsError(false);
+      router.refresh();
+    });
+  }
+
+  function handleDelete() {
+    if (!window.confirm("Delete this draft and all of its sections?")) {
+      return;
+    }
+    startTransition(async () => {
+      const error = await deleteContent(content.id);
+      if (error) {
+        setFeedback(error);
+        setFeedbackIsError(true);
+        return;
+      }
+      router.push("/workspace");
+      router.refresh();
+    });
+  }
+
+  const dirtyChanged = dirty || !sameSections(sections, savedSections);
+
+  return (
+    <form onSubmit={handleSave}>
+      <header className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-[min(100%,20rem)] flex-1">
+            {canEdit ? (
+              <label className="sr-only" htmlFor="contentTitle">
+                Content title
+              </label>
+            ) : null}
+            <input
+              className={`w-full rounded-lg border px-3 py-2 text-2xl font-semibold tracking-tight text-zinc-900 ${
+                canEdit
+                  ? "border-zinc-300 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                  : "border-transparent bg-transparent"
+              }`}
+              disabled={!canEdit}
+              id="contentTitle"
+              maxLength={200}
+              onChange={(event) => {
+                setTitle(event.target.value);
+                markDirty();
+              }}
+              required
+              value={title}
+            />
+          </div>
+          <span
+            className={`rounded-full px-3 py-1.5 text-sm font-medium ${
+              content.status === "approved"
+                ? "bg-emerald-100 text-emerald-800"
+                : content.status === "changes_requested"
+                  ? "bg-amber-100 text-amber-800"
+                  : content.status === "in_review"
+                    ? "bg-blue-100 text-blue-800"
+                    : "bg-zinc-100 text-zinc-700"
+            }`}
+          >
+            {statusLabels[content.status] ?? content.status}
+          </span>
+        </div>
+        {!canEdit && (
+          <p className="mt-2 text-sm text-zinc-500">
+            Read-only view. Only the creator can edit while the content is a
+            draft or has changes requested.
+          </p>
+        )}
+        {canEdit && dirtyChanged && (
+          <p className="mt-3 text-sm font-medium text-amber-700">
+            Unsaved changes
+          </p>
+        )}
+      </header>
+
+      <section className="mt-5 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <h2 className="font-semibold text-zinc-900">Platforms</h2>
+        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-3">
+          {platforms.map((platform) => (
+            <label
+              className="inline-flex items-center gap-2 text-sm text-zinc-700"
+              key={platform}
+            >
+              <input
+                checked={selectedPlatforms.includes(platform)}
+                className="size-4 rounded border-zinc-300 text-indigo-600 focus:ring-indigo-500"
+                disabled={!canEdit}
+                onChange={(event) =>
+                  changePlatform(platform, event.target.checked)
+                }
+                type="checkbox"
+              />
+              {platform}
+            </label>
+          ))}
+        </div>
+      </section>
+
+      <section className="mt-5 space-y-4">
+        {sections.map((section, index) => (
+          <article
+            className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
+            key={section.id}
+          >
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="font-semibold text-zinc-900">
+                {section.type === "text" ? "Text section" : "Image section"}{" "}
+                <span className="font-normal text-zinc-500">
+                  {index + 1} of {sections.length}
+                </span>
+              </h2>
+              {canEdit && (
+                <div className="flex gap-2">
+                  <button
+                    aria-label="Move section up"
+                    className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-sm text-zinc-700 disabled:opacity-40"
+                    disabled={index === 0 || isPending}
+                    onClick={() => moveSection(index, -1)}
+                    type="button"
+                  >
+                    Move up
+                  </button>
+                  <button
+                    aria-label="Move section down"
+                    className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-sm text-zinc-700 disabled:opacity-40"
+                    disabled={index === sections.length - 1 || isPending}
+                    onClick={() => moveSection(index, 1)}
+                    type="button"
+                  >
+                    Move down
+                  </button>
+                  <button
+                    className="rounded-md px-2.5 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
+                    disabled={sections.length === 1 || isPending}
+                    onClick={() => removeSection(section.id)}
+                    type="button"
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {section.type === "text" ? (
+              <TextSection
+                body={section.body ?? ""}
+                canEdit={canEdit}
+                onChange={(body) => updateSection(section.id, { body })}
+              />
+            ) : (
+              <ImageSection
+                altText={section.alt_text ?? ""}
+                canEdit={canEdit}
+                contentId={content.id}
+                imagePath={section.image_path}
+                imageUrl={imageUrls[section.id]}
+                isPending={isPending}
+                onAltTextChange={(alt_text) =>
+                  updateSection(section.id, { alt_text })
+                }
+                onImageChange={(image_path, imageUrl) => {
+                  updateSection(section.id, { image_path });
+                  if (imageUrl) {
+                    setImageUrls((current) => ({
+                      ...current,
+                      [section.id]: imageUrl,
+                    }));
+                  }
+                }}
+              />
+            )}
+          </article>
+        ))}
+      </section>
+
+      {canEdit && (
+        <>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <button
+              className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+              onClick={() => addSection("text")}
+              type="button"
+            >
+              Add text section
+            </button>
+            <button
+              className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+              onClick={() => addSection("image")}
+              type="button"
+            >
+              Add image section
+            </button>
+          </div>
+
+          <div className="sticky bottom-0 z-10 mt-8 flex flex-wrap items-center justify-between gap-4 border-t border-zinc-200 bg-zinc-50/95 py-4 backdrop-blur">
+            <div className="flex items-center gap-4">
+              <span className="text-sm text-zinc-600">
+                {dirtyChanged ? "Unsaved changes" : "All changes saved"}
+              </span>
+              {content.status === "draft" && (
+                <button
+                  className="text-sm font-medium text-red-600 hover:text-red-700"
+                  disabled={isPending}
+                  onClick={handleDelete}
+                  type="button"
+                >
+                  Delete draft
+                </button>
+              )}
+            </div>
+            <button
+              className="rounded-lg bg-indigo-600 px-5 py-2.5 font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={isPending || !dirtyChanged || !title.trim()}
+              type="submit"
+            >
+              {isPending ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </>
+      )}
+
+      {feedback && (
+        <p
+          className={`mt-4 rounded-lg px-4 py-3 text-sm ${
+            feedbackIsError
+              ? "bg-red-50 text-red-700"
+              : "bg-emerald-50 text-emerald-800"
+          }`}
+          role="status"
+        >
+          {feedback}
+        </p>
+      )}
+    </form>
+  );
+}
+
+function sameSections(a: ContentSection[], b: ContentSection[]): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function TextSection({
+  body,
+  canEdit,
+  onChange,
+}: {
+  body: string;
+  canEdit: boolean;
+  onChange: (body: string) => void;
+}) {
+  const editor = useEditor(
+    {
+      extensions: [
+        StarterKit.configure({ link: false }),
+        Link.configure({
+          openOnClick: false,
+          HTMLAttributes: { rel: "noopener noreferrer" },
+        }),
+      ],
+      content: body || "<p></p>",
+      editable: canEdit,
+      immediatelyRender: false,
+      onUpdate: ({ editor: currentEditor }) => onChange(currentEditor.getHTML()),
+    },
+    [canEdit]
+  );
+
+  if (!editor) {
+    return (
+      <div className="min-h-32 rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-400">
+        Loading text editor...
+      </div>
+    );
+  }
+
+  function addLink() {
+    if (!editor) {
+      return;
+    }
+    const url = window.prompt("Enter the link URL");
+    if (!url) {
+      return;
+    }
+    editor
+      .chain()
+      .focus()
+      .extendMarkRange("link")
+      .setLink({ href: url, rel: "noopener noreferrer" })
+      .run();
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-zinc-200">
+      {canEdit && (
+        <div className="flex flex-wrap gap-1 border-b border-zinc-200 bg-zinc-50 p-2">
+          <ToolbarButton
+            active={editor.isActive("bold")}
+            disabled={!canEdit}
+            onClick={() => editor.chain().focus().toggleBold().run()}
+          >
+            Bold
+          </ToolbarButton>
+          <ToolbarButton
+            active={editor.isActive("italic")}
+            disabled={!canEdit}
+            onClick={() => editor.chain().focus().toggleItalic().run()}
+          >
+            Italic
+          </ToolbarButton>
+          <ToolbarButton
+            active={editor.isActive("bulletList")}
+            disabled={!canEdit}
+            onClick={() => editor.chain().focus().toggleBulletList().run()}
+          >
+            Bullet list
+          </ToolbarButton>
+          <ToolbarButton
+            active={editor.isActive("orderedList")}
+            disabled={!canEdit}
+            onClick={() => editor.chain().focus().toggleOrderedList().run()}
+          >
+            Numbered list
+          </ToolbarButton>
+          <ToolbarButton
+            active={editor.isActive("link")}
+            disabled={!canEdit}
+            onClick={addLink}
+          >
+            Link
+          </ToolbarButton>
+        </div>
+      )}
+      <EditorContent
+        className={`content-prose min-h-40 px-4 py-3 text-sm leading-6 text-zinc-800 [&_.tiptap]:min-h-32 [&_.tiptap]:outline-none [&_a]:text-indigo-700 [&_a]:underline [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-6`}
+        editor={editor}
+      />
+    </div>
+  );
+}
+
+function ToolbarButton({
+  active,
+  children,
+  disabled,
+  onClick,
+}: {
+  active: boolean;
+  children: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      aria-pressed={active}
+      className={`rounded px-2.5 py-1.5 text-xs font-medium ${
+        active
+          ? "bg-indigo-100 text-indigo-800"
+          : "text-zinc-700 hover:bg-zinc-200"
+      }`}
+      disabled={disabled}
+      onClick={onClick}
+      type="button"
+    >
+      {children}
+    </button>
+  );
+}
+
+function ImageSection({
+  altText,
+  canEdit,
+  contentId,
+  imagePath,
+  imageUrl,
+  isPending,
+  onAltTextChange,
+  onImageChange,
+}: {
+  altText: string;
+  canEdit: boolean;
+  contentId: string;
+  imagePath: string | null;
+  imageUrl?: string;
+  isPending: boolean;
+  onAltTextChange: (value: string) => void;
+  onImageChange: (path: string, url?: string) => void;
+}) {
+  const [error, setError] = useState("");
+  const [uploadPending, startUpload] = useTransition();
+
+  function handleUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    if (!file) {
+      return;
+    }
+    setError("");
+    startUpload(async () => {
+      const result = await uploadImage(contentId, file);
+      if ("error" in result) {
+        setError(result.error);
+      } else {
+        onImageChange(result.path, result.url);
+      }
+    });
+  }
+
+  return (
+    <div className="space-y-4">
+      {canEdit && (
+        <div>
+          <label
+            className="mb-1.5 block text-sm font-medium text-zinc-700"
+            htmlFor={`image-${contentId}-${imagePath ?? "new"}`}
+          >
+            Upload image
+          </label>
+          <input
+            accept="image/png,image/jpeg,image/webp"
+            className="block w-full text-sm text-zinc-700 file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-100 file:px-3 file:py-2 file:font-medium file:text-zinc-700 hover:file:bg-zinc-200"
+            disabled={isPending || uploadPending}
+            id={`image-${contentId}-${imagePath ?? "new"}`}
+            onChange={handleUpload}
+            type="file"
+          />
+          <p className="mt-1 text-xs text-zinc-500">
+            PNG, JPEG, or WEBP. Maximum 5 MB.
+          </p>
+        </div>
+      )}
+      {imageUrl && (
+        <Image
+          alt={altText || "Content image preview"}
+          className="max-h-96 w-full rounded-lg border border-zinc-200 bg-zinc-50 object-contain"
+          height={600}
+          unoptimized
+          src={imageUrl}
+          width={900}
+        />
+      )}
+      {imagePath && !imageUrl && (
+        <p className="text-sm text-zinc-500">Loading image preview...</p>
+      )}
+      {canEdit ? (
+        <div>
+          <label
+            className="mb-1.5 block text-sm font-medium text-zinc-700"
+            htmlFor={`alt-${contentId}-${imagePath ?? "new"}`}
+          >
+            Alt text
+          </label>
+          <input
+            className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-zinc-900"
+            id={`alt-${contentId}-${imagePath ?? "new"}`}
+            maxLength={500}
+            onChange={(event) => onAltTextChange(event.target.value)}
+            required
+            type="text"
+            value={altText}
+          />
+          {!altText.trim() && (
+            <p className="mt-1 text-xs text-amber-700">
+              Add alt text before saving this image section.
+            </p>
+          )}
+        </div>
+      ) : (
+        <p className="text-sm text-zinc-600">
+          <span className="font-medium">Alt text:</span>{" "}
+          {altText || "Not provided"}
+        </p>
+      )}
+      {error && (
+        <p className="text-sm text-red-700" role="alert">
+          {error}
+        </p>
+      )}
+      {uploadPending && (
+        <p className="text-sm text-zinc-500">Uploading image...</p>
+      )}
+    </div>
+  );
+}
