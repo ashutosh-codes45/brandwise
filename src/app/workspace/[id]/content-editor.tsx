@@ -7,7 +7,6 @@ import {
   useState,
   useTransition,
   type ChangeEvent,
-  type FormEvent,
 } from "react";
 import { useRouter } from "next/navigation";
 import { EditorContent, useEditor } from "@tiptap/react";
@@ -22,6 +21,20 @@ import {
 } from "../actions";
 import { ReviewPanel } from "./review-panel";
 import type { ReviewFindingState } from "@/lib/review/types";
+import {
+  CommentsPanel,
+  CommentThread,
+} from "./comments-panel";
+import {
+  listComments,
+  type ContentComment,
+} from "./comment-actions";
+import {
+  ActivityPanel,
+  type ContentActivityEvent,
+} from "./activity-panel";
+import { WorkflowBar } from "./workflow-bar";
+import type { MemberRole } from "@/lib/auth/roles";
 
 const platforms = [
   "LinkedIn",
@@ -61,11 +74,25 @@ export function ContentEditor({
   canEdit,
   initialFindings,
   initialStats,
+  initialComments,
+  initialEvents,
+  currentUserId,
+  role,
+  isCreator,
+  latestChangeNote,
+  approvedBy,
 }: {
   content: ContentData;
   canEdit: boolean;
   initialFindings: ReviewFindingState[];
   initialStats: Record<string, unknown> | null;
+  initialComments: ContentComment[];
+  initialEvents: ContentActivityEvent[];
+  currentUserId: string;
+  role: MemberRole;
+  isCreator: boolean;
+  latestChangeNote: string | null;
+  approvedBy: { email: string; createdAt: string } | null;
 }) {
   const router = useRouter();
   const [title, setTitle] = useState(content.title);
@@ -83,6 +110,13 @@ export function ContentEditor({
     sectionId: string;
     excerpt: string;
   } | null>(null);
+  const [comments, setComments] = useState(initialComments);
+  const [activeSideTab, setActiveSideTab] = useState<
+    "review" | "comments" | "activity"
+  >("review");
+  const [openSectionComments, setOpenSectionComments] = useState<
+    Record<string, boolean>
+  >({});
 
   const markDirty = useCallback(() => setDirty(true), []);
   const imagePathKey = useMemo(
@@ -222,8 +256,19 @@ export function ContentEditor({
     markDirty();
   }
 
-  function handleSave(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function refreshComments() {
+    const result = await listComments(content.id);
+    if ("error" in result) {
+      setFeedback(result.error);
+      setFeedbackIsError(true);
+      return;
+    }
+    setComments(result.comments);
+    setFeedback("");
+    setFeedbackIsError(false);
+  }
+
+  function handleSave() {
     setFeedback("");
     startTransition(async () => {
       const result = await saveContent(
@@ -286,7 +331,16 @@ export function ContentEditor({
   }
 
   return (
-    <form onSubmit={handleSave}>
+    <div>
+      <WorkflowBar
+        approvedBy={approvedBy}
+        contentId={content.id}
+        isCreator={isCreator}
+        latestChangeNote={latestChangeNote}
+        role={role}
+        status={content.status}
+        unsavedChanges={dirtyChanged}
+      />
       <header className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-[min(100%,20rem)] flex-1">
@@ -377,9 +431,30 @@ export function ContentEditor({
                 <span className="font-normal text-zinc-500">
                   {index + 1} of {sections.length}
                 </span>
+                <span className="ml-2 rounded-full bg-zinc-100 px-2 py-0.5 align-middle text-xs font-normal text-zinc-600">
+                  {
+                    comments.filter(
+                      (comment) => comment.section_id === section.id
+                    ).length
+                  }{" "}
+                  comments
+                </span>
               </h2>
-              {canEdit && (
-                <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="rounded-md border border-indigo-200 px-2.5 py-1.5 text-sm text-indigo-700 hover:bg-indigo-50"
+                  onClick={() =>
+                    setOpenSectionComments((current) => ({
+                      ...current,
+                      [section.id]: !current[section.id],
+                    }))
+                  }
+                  type="button"
+                >
+                  {openSectionComments[section.id] ? "Hide comments" : "Add comment"}
+                </button>
+                {canEdit && (
+                <>
                   <button
                     aria-label="Move section up"
                     className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-sm text-zinc-700 disabled:opacity-40"
@@ -406,9 +481,23 @@ export function ContentEditor({
                   >
                     Delete
                   </button>
-                </div>
-              )}
+                </>
+                )}
+              </div>
             </div>
+
+            {openSectionComments[section.id] && (
+              <div className="mb-4 border-b border-zinc-100 pb-4">
+                <CommentThread
+                  comments={comments}
+                  compact
+                  contentId={content.id}
+                  currentUserId={currentUserId}
+                  onRefresh={refreshComments}
+                  target={{ type: "section", sectionId: section.id }}
+                />
+              </div>
+            )}
 
             {section.type === "text" ? (
               <TextSection
@@ -485,7 +574,8 @@ export function ContentEditor({
             <button
               className="rounded-lg bg-indigo-600 px-5 py-2.5 font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
               disabled={isPending || !dirtyChanged || !title.trim()}
-              type="submit"
+              onClick={handleSave}
+              type="button"
             >
               {isPending ? "Saving..." : "Save"}
             </button>
@@ -493,19 +583,67 @@ export function ContentEditor({
         </>
       )}
       </div>
-      <ReviewPanel
-        contentId={content.id}
-        editable={canEdit}
-        initialFindings={initialFindings}
-        initialStats={initialStats}
-        onFocusExcerpt={focusExcerpt}
-        onSectionsApplied={acceptAppliedSections}
-        sectionLabels={sections.map((section, index) => ({
-          id: section.id,
-          label: `${section.type === "text" ? "Text" : "Image"} section ${index + 1}`,
-        }))}
-        unsavedChanges={dirtyChanged}
-      />
+      <aside className="space-y-3 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+        <nav
+          aria-label="Content side panel"
+          className="flex rounded-xl border border-zinc-200 bg-white p-1 shadow-sm"
+        >
+          {(["review", "comments", "activity"] as const).map((tab) => (
+            <button
+              aria-current={activeSideTab === tab ? "page" : undefined}
+              className={`flex-1 rounded-lg px-2 py-2 text-xs font-medium capitalize ${
+                activeSideTab === tab
+                  ? "bg-indigo-50 text-indigo-700"
+                  : "text-zinc-600 hover:bg-zinc-50"
+              }`}
+              key={tab}
+              onClick={() => setActiveSideTab(tab)}
+              type="button"
+            >
+              {tab}
+              {tab === "comments" &&
+                comments.filter(
+                  (comment) =>
+                    comment.section_id === null && comment.finding_id === null
+                ).length > 0 &&
+                ` (${comments.filter((comment) => comment.section_id === null && comment.finding_id === null).length})`}
+            </button>
+          ))}
+        </nav>
+        {activeSideTab === "review" && (
+          <ReviewPanel
+            comments={comments}
+            contentId={content.id}
+            currentUserId={currentUserId}
+            editable={canEdit}
+            initialFindings={initialFindings}
+            initialStats={initialStats}
+            onCommentsRefresh={refreshComments}
+            onFocusExcerpt={focusExcerpt}
+            onSectionsApplied={acceptAppliedSections}
+            sectionLabels={sections.map((section, index) => ({
+              id: section.id,
+              label: `${section.type === "text" ? "Text" : "Image"} section ${index + 1}`,
+            }))}
+            unsavedChanges={dirtyChanged}
+          />
+        )}
+        {activeSideTab === "comments" && (
+          <CommentsPanel
+            comments={comments}
+            contentId={content.id}
+            currentUserId={currentUserId}
+            onRefresh={refreshComments}
+          />
+        )}
+        {activeSideTab === "activity" && (
+          <ActivityPanel
+            comments={comments}
+            contentId={content.id}
+            events={initialEvents}
+          />
+        )}
+      </aside>
       </div>
 
       {feedback && (
@@ -520,7 +658,7 @@ export function ContentEditor({
           {feedback}
         </p>
       )}
-    </form>
+    </div>
   );
 }
 

@@ -8,7 +8,13 @@ export default async function Home() {
   const member = await getCurrentMember();
 
   if (member) {
-    redirect(member.role === "brand_manager" ? "/vault" : "/workspace");
+    redirect(
+      member.role === "brand_manager"
+        ? "/vault"
+        : member.role === "reviewer"
+          ? "/review"
+          : "/workspace"
+    );
   }
 
   const supabase = await createClient();

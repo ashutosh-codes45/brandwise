@@ -4,8 +4,11 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { getCurrentMember } from "@/lib/auth/current-member";
 import { createClient } from "@/lib/supabase/server";
+import { AppNav } from "@/components/app-nav";
 import { ContentEditor } from "./content-editor";
 import { getReviewState } from "./review-actions";
+import type { ContentComment } from "./comment-actions";
+import type { ContentActivityEvent } from "./activity-panel";
 
 export const instant = false;
 
@@ -16,7 +19,7 @@ type ContentPageProps = {
 export default function ContentPage({ params }: ContentPageProps) {
   return (
     <main className="min-h-full flex-1 bg-zinc-50 px-4 py-10 sm:px-6">
-      <div className="mx-auto max-w-5xl">
+      <div className="mx-auto max-w-7xl">
         <Suspense
           fallback={
             <section className="rounded-2xl border border-zinc-200 bg-white p-8 text-sm text-zinc-500">
@@ -89,9 +92,31 @@ async function ContentPageContent({ params }: ContentPageProps) {
   if ("error" in reviewState) {
     throw new Error(reviewState.error);
   }
+  const [{ data: commentsData, error: commentsError }, { data: eventsData, error: eventsError }] =
+    await Promise.all([
+      supabase.rpc("list_content_comments", { p_content: content.id }),
+      supabase.rpc("list_content_events", { p_content: content.id }),
+    ]);
+  if (commentsError) {
+    throw new Error(commentsError.message);
+  }
+  if (eventsError) {
+    throw new Error(eventsError.message);
+  }
+  const comments = (commentsData ?? []) as ContentComment[];
+  const events = (eventsData ?? []) as ContentActivityEvent[];
+  const latestChangeNote =
+    content.status === "changes_requested"
+      ? events.find((event) => event.event === "changes_requested")?.note ?? null
+      : null;
+  const approvedEvent =
+    content.status === "approved"
+      ? events.find((event) => event.event === "approved")
+      : undefined;
 
   return (
     <>
+      <AppNav member={member} />
       <div className="mb-5">
         <Link
           className="text-sm font-medium text-indigo-600 hover:text-indigo-700"
@@ -114,6 +139,20 @@ async function ContentPageContent({ params }: ContentPageProps) {
         canEdit={canEdit}
         initialFindings={reviewState.findings}
         initialStats={reviewState.stats}
+        initialComments={comments}
+        initialEvents={events}
+        currentUserId={member.userId}
+        role={membership.role}
+        isCreator={content.created_by === member.userId}
+        latestChangeNote={latestChangeNote}
+        approvedBy={
+          approvedEvent
+            ? {
+                email: approvedEvent.actor_email,
+                createdAt: approvedEvent.created_at,
+              }
+            : null
+        }
       />
     </>
   );

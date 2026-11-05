@@ -9,6 +9,10 @@ import {
   runReviewAction,
 } from "./review-actions";
 import type { ReviewFindingState } from "@/lib/review/types";
+import {
+  CommentThread,
+} from "./comments-panel";
+import type { ContentComment } from "./comment-actions";
 
 type AppliedSection = {
   id: string;
@@ -32,6 +36,9 @@ export function ReviewPanel({
   unsavedChanges,
   initialFindings,
   initialStats,
+  comments,
+  currentUserId,
+  onCommentsRefresh,
   onFocusExcerpt,
   onSectionsApplied,
 }: {
@@ -41,6 +48,9 @@ export function ReviewPanel({
   unsavedChanges: boolean;
   initialFindings: ReviewFindingState[];
   initialStats: Record<string, unknown> | null;
+  comments: ContentComment[];
+  currentUserId: string;
+  onCommentsRefresh: () => Promise<void>;
   onFocusExcerpt: (sectionId: string, excerpt: string) => void;
   onSectionsApplied: (sections: AppliedSection[]) => void;
 }) {
@@ -469,6 +479,24 @@ export function ReviewPanel({
                 )}
               </div>
 
+              <details className="mt-3 border-t border-zinc-100 pt-2">
+                <summary className="cursor-pointer text-xs font-medium text-zinc-600">
+                  Comments (
+                  {comments.filter((comment) => comment.finding_id === finding.id).length}
+                  )
+                </summary>
+                <div className="mt-3">
+                  <CommentThread
+                    comments={comments}
+                    compact
+                    contentId={contentId}
+                    currentUserId={currentUserId}
+                    onRefresh={onCommentsRefresh}
+                    target={{ type: "finding", findingId: finding.id }}
+                  />
+                </div>
+              </details>
+
               {editable && (
                 <>
                   <label className="mt-3 block text-xs font-semibold text-zinc-600">
@@ -578,6 +606,25 @@ export function ReviewPanel({
                       {finding.dismiss_reason}
                     </p>
                   )}
+                  <details className="mt-2 border-t border-zinc-200 pt-2">
+                    <summary className="cursor-pointer text-xs font-medium text-zinc-600">
+                      Comments (
+                      {comments.filter(
+                        (comment) => comment.finding_id === finding.id
+                      ).length}
+                      )
+                    </summary>
+                    <div className="mt-3">
+                      <CommentThread
+                        comments={comments}
+                        compact
+                        contentId={contentId}
+                        currentUserId={currentUserId}
+                        onRefresh={onCommentsRefresh}
+                        target={{ type: "finding", findingId: finding.id }}
+                      />
+                    </div>
+                  </details>
                 </li>
               ))}
             </ul>

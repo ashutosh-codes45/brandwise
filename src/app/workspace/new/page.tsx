@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getCurrentMember } from "@/lib/auth/current-member";
 import { NewContentForm } from "./new-content-form";
+import { AppNav } from "@/components/app-nav";
 
 export const instant = false;
 
@@ -37,6 +38,8 @@ async function NewContentContent() {
   }
 
   return (
+    <>
+    <AppNav member={member} />
     <section className="rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm">
       <Link
         className="text-sm font-medium text-indigo-600 hover:text-indigo-700"
@@ -52,5 +55,6 @@ async function NewContentContent() {
       </p>
       <NewContentForm />
     </section>
+    </>
   );
 }

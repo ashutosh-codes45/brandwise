@@ -70,7 +70,13 @@ export async function signIn(
       : mismatchMessage;
   }
 
-  redirect(member.role === "brand_manager" ? "/vault" : "/workspace");
+  redirect(
+    member.role === "brand_manager"
+      ? "/vault"
+      : member.role === "reviewer"
+        ? "/review"
+        : "/workspace"
+  );
 }
 
 export async function signUp(

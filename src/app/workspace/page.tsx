@@ -2,9 +2,9 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { signOut } from "@/app/(auth)/actions";
 import { getCurrentMember } from "@/lib/auth/current-member";
 import { createClient } from "@/lib/supabase/server";
+import { AppNav } from "@/components/app-nav";
 
 export const instant = false;
 
@@ -69,6 +69,7 @@ async function WorkspaceContent() {
 
   return (
     <>
+      <AppNav member={member} />
       <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
         <div>
           {member.role === "brand_manager" && (
@@ -96,11 +97,6 @@ async function WorkspaceContent() {
               New content
             </Link>
           )}
-          <form action={signOut}>
-            <button className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100">
-              Sign out
-            </button>
-          </form>
         </div>
       </header>
 

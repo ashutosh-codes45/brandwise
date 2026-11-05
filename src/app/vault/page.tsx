@@ -2,9 +2,9 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { signOut } from "@/app/(auth)/actions";
 import { getCurrentMember } from "@/lib/auth/current-member";
 import { createClient } from "@/lib/supabase/server";
+import { AppNav } from "@/components/app-nav";
 import { VaultManager } from "./vault-manager";
 
 export const instant = false;
@@ -53,6 +53,7 @@ async function VaultContent() {
 
   return (
     <>
+      <AppNav member={member} />
       <header className="mb-8 flex flex-wrap items-center justify-between gap-4 border-b border-zinc-200 pb-5">
         <div>
           <p className="text-sm text-zinc-600">
@@ -66,11 +67,6 @@ async function VaultContent() {
           >
             Manage team
           </Link>
-          <form action={signOut}>
-            <button className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-zinc-700">
-              Sign out
-            </button>
-          </form>
         </div>
       </header>
       <VaultManager items={items ?? []} />
