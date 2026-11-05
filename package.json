@@ -19,7 +19,9 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "sanitize-html": "^2.18.1",
-    "unpdf": "^2.1.0"
+    "server-only": "^0.0.1",
+    "unpdf": "^2.1.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",

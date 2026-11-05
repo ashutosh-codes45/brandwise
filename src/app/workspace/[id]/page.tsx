@@ -5,6 +5,7 @@ import Link from "next/link";
 import { getCurrentMember } from "@/lib/auth/current-member";
 import { createClient } from "@/lib/supabase/server";
 import { ContentEditor } from "./content-editor";
+import { getReviewState } from "./review-actions";
 
 export const instant = false;
 
@@ -83,6 +84,11 @@ async function ContentPageContent({ params }: ContentPageProps) {
     membership.role === "creator" &&
     content.created_by === member.userId &&
     (content.status === "draft" || content.status === "changes_requested");
+  const reviewState = await getReviewState(content.id);
+
+  if ("error" in reviewState) {
+    throw new Error(reviewState.error);
+  }
 
   return (
     <>
@@ -106,6 +112,8 @@ async function ContentPageContent({ params }: ContentPageProps) {
           })),
         }}
         canEdit={canEdit}
+        initialFindings={reviewState.findings}
+        initialStats={reviewState.stats}
       />
     </>
   );

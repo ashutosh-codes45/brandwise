@@ -11,7 +11,13 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { createItem, deleteItem, getSignedUrl, updateItem } from "./actions";
+import {
+  createItem,
+  deleteItem,
+  getSignedUrl,
+  reindexVault,
+  updateItem,
+} from "./actions";
 
 const kinds = ["guideline", "fact", "term", "asset"] as const;
 type VaultKind = (typeof kinds)[number];
@@ -158,6 +164,24 @@ export function VaultManager({ items }: { items: VaultItem[] }) {
     });
   }
 
+  function handleReindex() {
+    setFeedback("");
+    startTransition(async () => {
+      const result = await reindexVault();
+      if ("error" in result) {
+        showResult(result.error);
+        return;
+      }
+      setFeedback(
+        result.count
+          ? `Re-indexed ${result.count} Vault ${result.count === 1 ? "item" : "items"}.`
+          : "There are no Vault items to index."
+      );
+      setFeedbackIsError(false);
+      router.refresh();
+    });
+  }
+
   return (
     <div>
       <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
@@ -169,16 +193,27 @@ export function VaultManager({ items }: { items: VaultItem[] }) {
             Manage the guidelines, facts, terminology, and assets your team can use.
           </p>
         </div>
-        <button
-          className="rounded-lg bg-indigo-600 px-4 py-2.5 font-medium text-white hover:bg-indigo-700"
-          onClick={() => {
-            setEditingItem(null);
-            setIsAdding(true);
-          }}
-          type="button"
-        >
-          Add {activeKind === "asset" ? "asset" : activeKind}
-        </button>
+        <div className="flex flex-wrap gap-3">
+          <button
+            className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+            disabled={isPending}
+            onClick={handleReindex}
+            type="button"
+          >
+            Re-index Vault
+          </button>
+          <button
+            className="rounded-lg bg-indigo-600 px-4 py-2.5 font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+            disabled={isPending}
+            onClick={() => {
+              setEditingItem(null);
+              setIsAdding(true);
+            }}
+            type="button"
+          >
+            Add {activeKind === "asset" ? "asset" : activeKind}
+          </button>
+        </div>
       </div>
 
       <div className="mt-7 border-b border-zinc-200">

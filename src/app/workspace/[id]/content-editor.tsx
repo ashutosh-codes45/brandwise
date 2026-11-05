@@ -20,6 +20,8 @@ import {
   saveContent,
   uploadImage,
 } from "../actions";
+import { ReviewPanel } from "./review-panel";
+import type { ReviewFindingState } from "@/lib/review/types";
 
 const platforms = [
   "LinkedIn",
@@ -57,9 +59,13 @@ const statusLabels: Record<string, string> = {
 export function ContentEditor({
   content,
   canEdit,
+  initialFindings,
+  initialStats,
 }: {
   content: ContentData;
   canEdit: boolean;
+  initialFindings: ReviewFindingState[];
+  initialStats: Record<string, unknown> | null;
 }) {
   const router = useRouter();
   const [title, setTitle] = useState(content.title);
@@ -73,6 +79,10 @@ export function ContentEditor({
   const [feedbackIsError, setFeedbackIsError] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
+  const [highlightTarget, setHighlightTarget] = useState<{
+    sectionId: string;
+    excerpt: string;
+  } | null>(null);
 
   const markDirty = useCallback(() => setDirty(true), []);
   const imagePathKey = useMemo(
@@ -253,6 +263,28 @@ export function ContentEditor({
 
   const dirtyChanged = dirty || !sameSections(sections, savedSections);
 
+  function focusExcerpt(sectionId: string, excerpt: string) {
+    setHighlightTarget({ sectionId, excerpt });
+    document
+      .getElementById(`section-${sectionId}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function acceptAppliedSections(
+    appliedSections: Array<{
+      id: string;
+      type: "text" | "image";
+      body: string | null;
+      image_path: string | null;
+      alt_text: string | null;
+      position: number;
+    }>
+  ) {
+    setSections(appliedSections);
+    setSavedSections(appliedSections);
+    setDirty(false);
+  }
+
   return (
     <form onSubmit={handleSave}>
       <header className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -330,10 +362,13 @@ export function ContentEditor({
         </div>
       </section>
 
-      <section className="mt-5 space-y-4">
+      <div className="mt-5 grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.8fr)]">
+      <div className="min-w-0">
+      <section className="space-y-4">
         {sections.map((section, index) => (
           <article
             className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
+            id={`section-${section.id}`}
             key={section.id}
           >
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -379,6 +414,11 @@ export function ContentEditor({
               <TextSection
                 body={section.body ?? ""}
                 canEdit={canEdit}
+                highlightExcerpt={
+                  highlightTarget?.sectionId === section.id
+                    ? highlightTarget.excerpt
+                    : ""
+                }
                 onChange={(body) => updateSection(section.id, { body })}
               />
             ) : (
@@ -452,6 +492,21 @@ export function ContentEditor({
           </div>
         </>
       )}
+      </div>
+      <ReviewPanel
+        contentId={content.id}
+        editable={canEdit}
+        initialFindings={initialFindings}
+        initialStats={initialStats}
+        onFocusExcerpt={focusExcerpt}
+        onSectionsApplied={acceptAppliedSections}
+        sectionLabels={sections.map((section, index) => ({
+          id: section.id,
+          label: `${section.type === "text" ? "Text" : "Image"} section ${index + 1}`,
+        }))}
+        unsavedChanges={dirtyChanged}
+      />
+      </div>
 
       {feedback && (
         <p
@@ -476,10 +531,12 @@ function sameSections(a: ContentSection[], b: ContentSection[]): boolean {
 function TextSection({
   body,
   canEdit,
+  highlightExcerpt,
   onChange,
 }: {
   body: string;
   canEdit: boolean;
+  highlightExcerpt: string;
   onChange: (body: string) => void;
 }) {
   const editor = useEditor(
@@ -498,6 +555,34 @@ function TextSection({
     },
     [canEdit]
   );
+
+  useEffect(() => {
+    if (!editor || !highlightExcerpt) {
+      return;
+    }
+
+    const walker = document.createTreeWalker(editor.view.dom, NodeFilter.SHOW_TEXT);
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+      const text = node.textContent ?? "";
+      const index = text.indexOf(highlightExcerpt);
+      if (index < 0) {
+        continue;
+      }
+
+      const range = document.createRange();
+      range.setStart(node, index);
+      range.setEnd(node, index + highlightExcerpt.length);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      node.parentElement?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+      break;
+    }
+  }, [editor, highlightExcerpt]);
 
   if (!editor) {
     return (

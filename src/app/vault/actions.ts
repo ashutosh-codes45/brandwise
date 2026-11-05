@@ -2,6 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
+import { embedVaultItems } from "@/lib/ai/embed-vault";
 import { extractText } from "@/lib/extract-text";
 import { createClient } from "@/lib/supabase/server";
 
@@ -292,7 +293,9 @@ export async function createItem(
     }
   }
 
-  const { error } = await context.supabase.from("vault_items").insert({
+  const { data: createdItem, error } = await context.supabase
+    .from("vault_items")
+    .insert({
     org_id: context.orgId,
     kind: parsed.kind,
     title: parsed.title,
@@ -303,7 +306,9 @@ export async function createItem(
     tags: parsed.tags,
     asset_path: assetPath,
     created_by: context.userId,
-  });
+    })
+    .select("id")
+    .single();
 
   if (error) {
     const cleanupError = assetPath
@@ -318,8 +323,30 @@ export async function createItem(
     };
   }
 
+  let embeddingWarning: string | undefined;
+  try {
+    await embedVaultItems(
+      context.supabase,
+      [
+        {
+          id: createdItem.id,
+          title: parsed.title,
+          tags: parsed.tags,
+          body,
+        },
+      ],
+      context.orgId
+    );
+  } catch (embeddingError) {
+    embeddingWarning = `Item saved, but its search embedding could not be created: ${
+      embeddingError instanceof Error
+        ? embeddingError.message
+        : "unknown error"
+    }`;
+  }
+
   revalidatePath("/vault");
-  return { warning };
+  return { warning: [warning, embeddingWarning].filter(Boolean).join(" ") || undefined };
 }
 
 export async function updateItem(
@@ -369,7 +396,7 @@ export async function updateItem(
     nextPath = uploadedPath;
   }
 
-  const { error } = await context.supabase
+  const { data: updatedItem, error } = await context.supabase
     .from("vault_items")
     .update({
       kind: parsed.kind,
@@ -382,7 +409,9 @@ export async function updateItem(
       asset_path: nextPath,
     })
     .eq("id", parsed.id)
-    .eq("org_id", context.orgId);
+    .eq("org_id", context.orgId)
+    .select("id")
+    .maybeSingle();
 
   if (error) {
     const cleanupError = uploadedPath
@@ -395,6 +424,31 @@ export async function updateItem(
         : error.message,
     };
   }
+  if (!updatedItem) {
+    return { error: "Vault item not found." };
+  }
+
+  let embeddingWarning: string | undefined;
+  try {
+    await embedVaultItems(
+      context.supabase,
+      [
+        {
+          id: updatedItem.id,
+          title: parsed.title,
+          tags: parsed.tags,
+          body,
+        },
+      ],
+      context.orgId
+    );
+  } catch (embeddingError) {
+    embeddingWarning = `Item saved, but its search embedding could not be updated: ${
+      embeddingError instanceof Error
+        ? embeddingError.message
+        : "unknown error"
+    }`;
+  }
 
   if (existing.asset_path && existing.asset_path !== nextPath) {
     const oldBucket = getBucket(existing.kind);
@@ -404,13 +458,18 @@ export async function updateItem(
     if (removalError) {
       revalidatePath("/vault");
       return {
-        warning: `Item updated, but its previous file could not be removed: ${removalError.message}`,
+        warning: [
+          embeddingWarning,
+          `Item updated, but its previous file could not be removed: ${removalError.message}`,
+        ]
+          .filter(Boolean)
+          .join(" "),
       };
     }
   }
 
   revalidatePath("/vault");
-  return { warning };
+  return { warning: [warning, embeddingWarning].filter(Boolean).join(" ") || undefined };
 }
 
 export async function deleteItem(
@@ -491,4 +550,44 @@ export async function getSignedUrl(
   }
 
   return { url: data.signedUrl };
+}
+
+export async function reindexVault(): Promise<
+  { error: string } | { count: number }
+> {
+  const context = await getManagerContext();
+  if (!context.ok) {
+    return { error: context.error };
+  }
+
+  const { data: items, error } = await context.supabase
+    .from("vault_items")
+    .select("id, title, tags, body")
+    .eq("org_id", context.orgId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  let count = 0;
+  for (let offset = 0; offset < (items ?? []).length; offset += 10) {
+    const batch = (items ?? []).slice(offset, offset + 10);
+    try {
+      await embedVaultItems(context.supabase, batch, context.orgId);
+      count += batch.length;
+    } catch (embeddingError) {
+      revalidatePath("/vault");
+      return {
+        error: `Indexed ${count} items before the next batch failed: ${
+          embeddingError instanceof Error
+            ? embeddingError.message
+            : "unknown error"
+        }`,
+      };
+    }
+  }
+
+  revalidatePath("/vault");
+  return { count };
 }
