@@ -13,13 +13,18 @@ export function AppNav({
           { href: "/vault", label: "Vault" },
           { href: "/review", label: "Review queue" },
           { href: "/workspace", label: "Workspace" },
+          { href: "/insights", label: "Insights" },
         ]
       : member.role === "reviewer"
         ? [
             { href: "/review", label: "Review queue" },
             { href: "/workspace", label: "Workspace" },
+            { href: "/insights", label: "Insights" },
           ]
-        : [{ href: "/workspace", label: "Workspace" }];
+        : [
+            { href: "/workspace", label: "Workspace" },
+            { href: "/insights", label: "Insights" },
+          ];
 
   return (
     <nav className="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-4">

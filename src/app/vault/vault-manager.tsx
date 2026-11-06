@@ -41,12 +41,20 @@ const kindLabels: Record<VaultKind, string> = {
   asset: "Assets",
 };
 
-export function VaultManager({ items }: { items: VaultItem[] }) {
+export function VaultManager({
+  items,
+  initialEditingItemId,
+}: {
+  items: VaultItem[];
+  initialEditingItemId?: string;
+}) {
   const router = useRouter();
   const [activeKind, setActiveKind] = useState<VaultKind>("guideline");
   const [search, setSearch] = useState("");
   const [selectedTag, setSelectedTag] = useState("");
-  const [editingItem, setEditingItem] = useState<VaultItem | null>(null);
+  const [editingItem, setEditingItem] = useState<VaultItem | null>(
+    () => items.find((item) => item.id === initialEditingItemId) ?? null
+  );
   const [isAdding, setIsAdding] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [feedbackIsError, setFeedbackIsError] = useState(false);

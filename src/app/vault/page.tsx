@@ -9,7 +9,11 @@ import { VaultManager } from "./vault-manager";
 
 export const instant = false;
 
-export default function VaultPage() {
+export default function VaultPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ edit?: string | string[] }>;
+}) {
   return (
     <main className="min-h-full flex-1 bg-zinc-50 px-4 py-10 sm:px-6">
       <div className="mx-auto max-w-6xl">
@@ -20,15 +24,21 @@ export default function VaultPage() {
             </p>
           }
         >
-          <VaultContent />
+          <VaultContent searchParams={searchParams} />
         </Suspense>
       </div>
     </main>
   );
 }
 
-async function VaultContent() {
+async function VaultContent({
+  searchParams,
+}: {
+  searchParams: Promise<{ edit?: string | string[] }>;
+}) {
   await connection();
+  const params = await searchParams;
+  const editParam = Array.isArray(params.edit) ? params.edit[0] : params.edit;
   const member = await getCurrentMember();
 
   if (!member) {
@@ -69,7 +79,10 @@ async function VaultContent() {
           </Link>
         </div>
       </header>
-      <VaultManager items={items ?? []} />
+      <VaultManager
+        initialEditingItemId={editParam}
+        items={items ?? []}
+      />
     </>
   );
 }
