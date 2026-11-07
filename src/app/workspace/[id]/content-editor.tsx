@@ -34,6 +34,7 @@ import {
   type ContentActivityEvent,
 } from "./activity-panel";
 import { WorkflowBar } from "./workflow-bar";
+import { ImportDocumentDialog } from "./import-document-dialog";
 import type { MemberRole } from "@/lib/auth/roles";
 
 const platforms = [
@@ -224,6 +225,35 @@ export function ContentEditor({
       },
     ]);
     markDirty();
+  }
+
+  function addImportedSections(
+    importedSections: { html: string }[],
+    fileName: string
+  ) {
+    const replaceEmptySection =
+      sections.length === 1 &&
+      sections[0].type === "text" &&
+      !(sections[0].body ?? "")
+        .replace(/<[^>]*>/g, "")
+        .replace(/&nbsp;|&#160;|&#xA0;/gi, " ")
+        .trim();
+    const existingSections = replaceEmptySection ? [] : sections;
+    const addedSections = importedSections.map((section, index) => ({
+      id: crypto.randomUUID(),
+      type: "text" as const,
+      body: section.html,
+      image_path: null,
+      alt_text: null,
+      position: existingSections.length + index,
+    }));
+
+    setSections([...existingSections, ...addedSections]);
+    markDirty();
+    setFeedback(
+      `Imported from ${fileName}. Review the sections, then press Save.`
+    );
+    setFeedbackIsError(false);
   }
 
   function moveSection(index: number, direction: -1 | 1) {
@@ -548,6 +578,10 @@ export function ContentEditor({
             >
               Add text section
             </button>
+            <ImportDocumentDialog
+              contentId={content.id}
+              onAdd={addImportedSections}
+            />
             <button
               className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
               onClick={() => addSection("image")}

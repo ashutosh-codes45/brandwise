@@ -5,7 +5,8 @@ const maxExtractedCharacters = 50_000;
 
 export async function extractText(
   file: File,
-  extension: string
+  extension: string,
+  maxCharacters: number | null = maxExtractedCharacters
 ): Promise<string> {
   const buffer = Buffer.from(await file.arrayBuffer());
   let text: string;
@@ -22,5 +23,5 @@ export async function extractText(
     text = buffer.toString("utf8");
   }
 
-  return text.slice(0, maxExtractedCharacters).trim();
+  return (maxCharacters === null ? text : text.slice(0, maxCharacters)).trim();
 }
