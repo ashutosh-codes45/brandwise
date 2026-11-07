@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { getCurrentMember } from "@/lib/auth/current-member";
+import { requireMember } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { AppNav } from "@/components/app-nav";
 import { ContentEditor } from "./content-editor";
@@ -39,11 +39,14 @@ export default function ContentPage({ params }: ContentPageProps) {
 async function ContentPageContent({ params }: ContentPageProps) {
   await connection();
   const { id } = await params;
-  const member = await getCurrentMember();
+  const { user, membership: userMembership } = await requireMember();
 
-  if (!member) {
-    redirect("/login");
-  }
+  const member = {
+    email: user.email ?? "",
+    orgId: userMembership.org_id,
+    role: userMembership.role,
+    userId: user.id,
+  };
 
   const supabase = await createClient();
   const { data: content, error: contentError } = await supabase

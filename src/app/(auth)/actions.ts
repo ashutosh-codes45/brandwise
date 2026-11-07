@@ -5,8 +5,6 @@ import { isMemberRole } from "@/lib/auth/roles";
 import { createClient } from "@/lib/supabase/server";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const noMembershipMessage =
-  "You haven't been added to an organisation yet. Ask your Brand Manager.";
 
 function isValidEmail(value: unknown): value is string {
   return typeof value === "string" && emailPattern.test(value.trim());
@@ -18,17 +16,13 @@ function isPassword(value: unknown): value is string {
 
 export async function signIn(
   email: unknown,
-  password: unknown,
-  selectedRole: unknown
+  password: unknown
 ): Promise<string | null> {
   if (!isValidEmail(email)) {
     return "Enter a valid email address.";
   }
   if (!isPassword(password)) {
     return "Enter your password.";
-  }
-  if (!isMemberRole(selectedRole)) {
-    return "Select a valid role.";
   }
 
   const supabase = await createClient();
@@ -49,25 +43,11 @@ export async function signIn(
     .maybeSingle();
 
   if (memberError) {
-    const { error: signOutError } = await supabase.auth.signOut();
-    return signOutError
-      ? `${memberError.message} ${signOutError.message}`
-      : memberError.message;
+    return memberError.message;
   }
 
   if (!member || !isMemberRole(member.role)) {
-    const { error: signOutError } = await supabase.auth.signOut();
-    return signOutError
-      ? `${noMembershipMessage} ${signOutError.message}`
-      : noMembershipMessage;
-  }
-
-  if (member.role !== selectedRole) {
-    const { error: signOutError } = await supabase.auth.signOut();
-    const mismatchMessage = `Your account role is ${member.role}, not ${selectedRole}.`;
-    return signOutError
-      ? `${mismatchMessage} ${signOutError.message}`
-      : mismatchMessage;
+    redirect("/onboarding");
   }
 
   redirect(
@@ -82,8 +62,7 @@ export async function signIn(
 export async function signUp(
   email: unknown,
   password: unknown,
-  selectedRole: unknown,
-  orgName?: unknown,
+  pathType: unknown,
   inviteCode?: unknown
 ): Promise<string | null> {
   if (!isValidEmail(email)) {
@@ -92,14 +71,20 @@ export async function signUp(
   if (typeof password !== "string" || password.length < 8) {
     return "Password must be at least 8 characters.";
   }
-  if (!isMemberRole(selectedRole)) {
-    return "Select a valid role.";
+  if (pathType !== "create" && pathType !== "join") {
+    return "Select whether to create a new workspace or join with an invite code.";
   }
 
-  const trimmedOrgName =
-    typeof orgName === "string" ? orgName.trim() : "";
-  if (selectedRole === "brand_manager" && !trimmedOrgName) {
-    return "Enter an organisation name.";
+  const trimmedInviteCode =
+    typeof inviteCode === "string" ? inviteCode.trim().toUpperCase() : "";
+
+  if (pathType === "join") {
+    if (!trimmedInviteCode) {
+      return "Enter an invite code.";
+    }
+    if (!/^[A-Z0-9]{8}$/.test(trimmedInviteCode)) {
+      return "Enter a valid 8-character invite code.";
+    }
   }
 
   const supabase = await createClient();
@@ -112,54 +97,34 @@ export async function signUp(
     return error?.message ?? "Unable to create your account.";
   }
 
-  if (selectedRole === "brand_manager") {
-    const { error: organisationError } = await supabase
-      .from("organisations")
-      .insert({ name: trimmedOrgName, created_by: data.user.id });
-
-    if (organisationError) {
-      return organisationError.message;
-    }
-
-    redirect("/vault");
+  // If email confirmation is ON and signUp returns no session
+  if (!data.session) {
+    redirect("/login?notice=check_email");
   }
 
-  const trimmedInviteCode =
-    typeof inviteCode === "string" ? inviteCode.trim() : "";
-  if (trimmedInviteCode) {
-    const { error: inviteError } = await supabase.rpc("redeem_invite", {
-      invite_code: trimmedInviteCode,
-    });
+  if (pathType === "create") {
+    redirect("/onboarding");
+  }
 
-    if (inviteError) {
-      const { error: signOutError } = await supabase.auth.signOut();
-      return signOutError
-        ? `${inviteError.message} ${signOutError.message}`
-        : inviteError.message;
-    }
+  // Path "join"
+  const { data: role, error: inviteError } = await supabase.rpc("redeem_invite", {
+    invite_code: trimmedInviteCode,
+  });
 
+  if (inviteError) {
+    // Keep the account, do not sign out
+    redirect("/onboarding?notice=invite_invalid");
+  }
+
+  if (role === "reviewer") {
+    redirect("/review");
+  } else {
     redirect("/workspace");
   }
-
-  const { error: signOutError } = await supabase.auth.signOut();
-  if (signOutError) {
-    return signOutError.message;
-  }
-
-  redirect(
-    `/login?message=${encodeURIComponent(
-      "Account created. Ask your Brand Manager to add you."
-    )}`
-  );
 }
 
 export async function signOut(): Promise<void> {
   const supabase = await createClient();
-  const { error } = await supabase.auth.signOut();
-
-  if (error) {
-    redirect(`/login?error=${encodeURIComponent(error.message)}`);
-  }
-
-  redirect("/login");
+  await supabase.auth.signOut();
+  redirect("/login?notice=signed_out");
 }

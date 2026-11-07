@@ -7,6 +7,8 @@ import { filterAiFindings } from "./filter";
 import { judgeSections, PROMPT_VERSION, type JudgeFinding } from "./judge";
 import { retrieveVaultSources } from "./retrieve";
 import { runRuleChecks } from "./rules";
+import { runPlatformChecks } from "./platform-rules";
+import { sanitizeExportHtml } from "@/lib/export/convert";
 import { getBrandKit } from "@/lib/context/get-brand-kit";
 import { evaluateImage, isImageAnalysis } from "@/lib/visual/evaluate";
 import {
@@ -166,7 +168,7 @@ async function runReviewPipeline(
   }
   const { data: content, error: contentError } = await supabase
     .from("contents")
-    .select("id, org_id, created_by, status")
+    .select("id, org_id, title, platforms, created_by, status")
     .eq("id", contentId)
     .eq("org_id", membership.org_id)
     .maybeSingle();
@@ -279,6 +281,15 @@ async function runReviewPipeline(
         source_quote: source?.is_confidential ? null : finding.source_quote,
       };
     });
+    const platformFindings = runPlatformChecks(
+      {
+        platforms: content.platforms ?? [],
+        title: content.title,
+        sections,
+        guidelines: [...allSources.values()],
+      },
+      { sanitize: sanitizeExportHtml }
+    );
     const visualSections = sections.filter(
       (section) =>
         section.type === "image" &&
@@ -286,13 +297,14 @@ async function runReviewPipeline(
         section.image_meta
     );
     if (visualSections.length === 0) {
-      return textRules;
+      return [...textRules, ...platformFindings];
     }
 
     const brandKit = await getBrandKit(membership.org_id);
     if (!brandKit) {
       return [
         ...textRules,
+        ...platformFindings,
         {
           section_id: visualSections[0].id,
           category: "visual" as const,
@@ -345,7 +357,7 @@ async function runReviewPipeline(
           note: null,
         }));
     });
-    return [...textRules, ...visualFindings];
+    return [...textRules, ...platformFindings, ...visualFindings];
   });
 
   let candidates: JudgeFinding[] = [];

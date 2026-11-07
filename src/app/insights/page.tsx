@@ -1,9 +1,9 @@
 import { Suspense } from "react";
 import { connection } from "next/server";
-import { redirect } from "next/navigation";
+
 import Link from "next/link";
 import { AppNav } from "@/components/app-nav";
-import { getCurrentMember } from "@/lib/auth/current-member";
+import { requireMember } from "@/lib/auth/session";
 import {
   calculateAcceptanceRate,
   getInsightsNeedsAttention,
@@ -58,10 +58,13 @@ export default function InsightsPage({
 
 async function InsightsContent({ searchParams }: { searchParams: SearchParams }) {
   await connection();
-  const member = await getCurrentMember();
-  if (!member) {
-    redirect("/login");
-  }
+  const { user, membership } = await requireMember();
+  const member = {
+    email: user.email ?? "",
+    orgId: membership.org_id,
+    role: membership.role,
+    userId: user.id,
+  };
 
   const params = await searchParams;
   const selectedDays = Array.isArray(params.days) ? params.days[0] : params.days;

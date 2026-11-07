@@ -5,7 +5,11 @@ import { revalidatePath } from "next/cache";
 import { embedVaultItems } from "@/lib/ai/embed-vault";
 import { extractText } from "@/lib/extract-text";
 import { createClient } from "@/lib/supabase/server";
-import { brandKitSchema, renderBrandKitText } from "@/lib/context/brand-kit";
+import {
+  brandKitSchema,
+  normalizeBrandKitData,
+  renderBrandKitText,
+} from "@/lib/context/brand-kit";
 
 const kinds = ["guideline", "fact", "term", "asset"] as const;
 type VaultKind = (typeof kinds)[number];
@@ -351,9 +355,18 @@ export async function createItem(
 }
 
 export async function saveBrandKit(
-  value: unknown
-): Promise<{ error: string } | { success: true }> {
-  const parsed = brandKitSchema.safeParse(value);
+  value: unknown,
+  confidential?: boolean
+): Promise<{ error?: string; warning?: string; success?: boolean }> {
+  const isConfidential =
+    typeof confidential === "boolean"
+      ? confidential
+      : typeof value === "object" && value !== null && "isConfidential" in value
+        ? Boolean((value as { isConfidential?: unknown }).isConfidential)
+        : false;
+
+  const normalized = normalizeBrandKitData(value);
+  const parsed = brandKitSchema.safeParse(normalized);
   if (!parsed.success) {
     return {
       error: `Brand kit is invalid: ${parsed.error.issues
@@ -385,7 +398,7 @@ export async function saveBrandKit(
     body,
     structured: parsed.data,
     tags: ["brand-kit"],
-    is_confidential: false,
+    is_confidential: isConfidential,
     created_by: context.userId,
   };
   const result = existing
@@ -397,7 +410,7 @@ export async function saveBrandKit(
           body,
           structured: parsed.data,
           tags: values.tags,
-          is_confidential: false,
+          is_confidential: isConfidential,
           asset_path: null,
           asset_meta: null,
           image_role: null,
@@ -426,10 +439,12 @@ export async function saveBrandKit(
       context.orgId
     );
   } catch (error) {
+    revalidatePath("/vault");
     return {
-      error: `Brand kit saved, but its search embedding could not be created: ${
+      warning: `Brand kit saved, but its search embedding could not be created: ${
         error instanceof Error ? error.message : "unknown error"
       }`,
+      success: true,
     };
   }
 

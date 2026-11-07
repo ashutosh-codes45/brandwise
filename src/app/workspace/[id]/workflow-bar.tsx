@@ -57,7 +57,16 @@ export function WorkflowBar({
       const result = await submitForReview(contentId, false);
       if ("error" in result && result.requiresAcknowledgement) {
         const count = result.openBlockers ?? 0;
-        if (!window.confirm(`There are ${count} open blockers. Send for review anyway?`)) {
+        const overLimit = result.overLimitPlatforms ?? [];
+        const platformNote =
+          overLimit.length > 0
+            ? ` (${overLimit.join(", ")} over the platform limit)`
+            : "";
+        if (
+          !window.confirm(
+            `There are ${count} open blockers${platformNote}. Send for review anyway?`
+          )
+        ) {
           return;
         }
         const confirmed = await submitForReview(contentId, true);

@@ -1,14 +1,22 @@
 import { Suspense } from "react";
 import { connection } from "next/server";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import Link from "next/link";
 import { AppNav } from "@/components/app-nav";
-import { getCurrentMember } from "@/lib/auth/current-member";
+import { requireMember } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { EXPORT_PLATFORMS, type PlatformKey } from "@/lib/export/platforms";
 import { convertApprovedSnapshot } from "@/lib/export/convert";
 import { createEmailExport } from "@/lib/export/email";
-import { ExportClient, type ExportHistoryItem } from "./export-client";
+import {
+  PLATFORM_OVER_LIMIT_RULE_ID,
+  platformLabelFromSource,
+} from "@/lib/review/platform-rules";
+import {
+  ExportClient,
+  type ExportHistoryItem,
+  type PlatformRecap,
+} from "./export-client";
 
 export const instant = false;
 
@@ -42,8 +50,14 @@ export default function ExportPage({ params }: ExportPageProps) {
 async function ExportPageContent({ params }: ExportPageProps) {
   await connection();
   const { id } = await params;
-  const member = await getCurrentMember();
-  if (!member) redirect("/login");
+  const { user, membership } = await requireMember();
+
+  const member = {
+    email: user.email ?? "",
+    orgId: membership.org_id,
+    role: membership.role,
+    userId: user.id,
+  };
 
   const supabase = await createClient();
   const { data: content, error: contentError } = await supabase
@@ -173,6 +187,46 @@ async function ApprovedExport({
   if (historyError) throw new Error(historyError.message);
   const history = (historyRows ?? []) as ExportHistoryItem[];
 
+  const { data: latestRun, error: runError } = await supabase
+    .from("review_runs")
+    .select("id")
+    .eq("org_id", orgId)
+    .eq("content_id", contentId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (runError) throw new Error(runError.message);
+
+  const { data: platformRows, error: platformError } = latestRun
+    ? await supabase
+        .from("findings")
+        .select("rule_id, source_label")
+        .eq("org_id", orgId)
+        .eq("content_id", contentId)
+        .eq("category", "platform")
+        .eq("run_id", latestRun.id)
+    : { data: [], error: null };
+  if (platformError) throw new Error(platformError.message);
+
+  const overLimitLabels = new Set(
+    (platformRows ?? [])
+      .filter((row) => row.rule_id === PLATFORM_OVER_LIMIT_RULE_ID)
+      .map((row) => platformLabelFromSource(row.source_label))
+      .filter((label): label is string => Boolean(label))
+  );
+  const recaps: Partial<Record<PlatformKey, PlatformRecap>> = {};
+  if (latestRun) {
+    for (const platform of platforms) {
+      const over = overLimitLabels.has(EXPORT_PLATFORMS[platform].label);
+      recaps[platform] = {
+        over,
+        message: over
+          ? "Over limit when reviewed"
+          : "Passed platform checks at review",
+      };
+    }
+  }
+
   return (
     <ExportClient
       approvedAt={approval.created_at}
@@ -186,6 +240,7 @@ async function ApprovedExport({
           alt_text: section.alt_text ?? "",
         }))}
       platforms={platforms}
+      recaps={recaps}
       results={results}
       title={snapshot.title ?? title}
     />

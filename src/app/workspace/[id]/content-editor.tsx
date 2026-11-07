@@ -22,6 +22,11 @@ import {
 import { ReviewPanel } from "./review-panel";
 import type { ReviewFindingState } from "@/lib/review/types";
 import {
+  formatPlatformChip,
+  summarizePlatformFit,
+  type PlatformFitRow,
+} from "@/lib/review/platform-rules";
+import {
   CommentsPanel,
   CommentThread,
 } from "./comments-panel";
@@ -129,6 +134,7 @@ export function ContentEditor({
   const [openSectionComments, setOpenSectionComments] = useState<
     Record<string, boolean>
   >({});
+  const [platformFit, setPlatformFit] = useState<PlatformFitRow[]>([]);
 
   const markDirty = useCallback(() => setDirty(true), []);
   const imagePathKey = useMemo(
@@ -211,6 +217,13 @@ export function ContentEditor({
       active = false;
     };
   }, [content.id, imagePathKey]);
+
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setPlatformFit(summarizePlatformFit(sections, selectedPlatforms));
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [sections, selectedPlatforms]);
 
   function updateSection(id: string, change: Partial<ContentSection>) {
     setSections((current) =>
@@ -446,30 +459,47 @@ export function ContentEditor({
       <section className="mt-5 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
         <h2 className="font-semibold text-zinc-900">Platforms</h2>
         <div className="mt-3 flex flex-wrap gap-x-5 gap-y-3">
-          {platforms.map((platform) => (
-            <label
-              className="inline-flex items-center gap-2 text-sm text-zinc-700"
-              key={platform}
-            >
-              <input
-                checked={selectedPlatforms.includes(platform)}
-                className="size-4 rounded border-zinc-300 text-indigo-600 focus:ring-indigo-500"
-                disabled={!canEdit}
-                onChange={(event) =>
-                  changePlatform(platform, event.target.checked)
-                }
-                type="checkbox"
-              />
-              {platform}
-            </label>
-          ))}
+          {platforms.map((platform) => {
+            const fit = platformFit.find((row) => row.platform === platform);
+            return (
+              <label
+                className="inline-flex items-center gap-2 text-sm text-zinc-700"
+                key={platform}
+              >
+                <input
+                  checked={selectedPlatforms.includes(platform)}
+                  className="size-4 rounded border-zinc-300 text-indigo-600 focus:ring-indigo-500"
+                  disabled={!canEdit}
+                  onChange={(event) =>
+                    changePlatform(platform, event.target.checked)
+                  }
+                  type="checkbox"
+                />
+                {platform}
+                {fit && (
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${platformChipClass(fit)}`}
+                  >
+                    {formatPlatformChip(fit)}
+                  </span>
+                )}
+              </label>
+            );
+          })}
         </div>
+        <p className="mt-2 text-xs text-zinc-500">
+          Counts are approximate; the platform may count differently.
+        </p>
       </section>
 
       <div className="mt-5 grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.8fr)]">
       <div className="min-w-0">
       <section className="space-y-4">
-        {sections.map((section, index) => (
+        {sections.map((section, index) => {
+          const overflowLabels = platformFit
+            .filter((row) => row.over && row.overflowSectionId === section.id)
+            .map((row) => row.label);
+          return (
           <article
             className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
             id={`section-${section.id}`}
@@ -550,16 +580,24 @@ export function ContentEditor({
             )}
 
             {section.type === "text" ? (
-              <TextSection
-                body={section.body ?? ""}
-                canEdit={canEdit}
-                highlightExcerpt={
-                  highlightTarget?.sectionId === section.id
-                    ? highlightTarget.excerpt
-                    : ""
-                }
-                onChange={(body) => updateSection(section.id, { body })}
-              />
+              <>
+                <TextSection
+                  body={section.body ?? ""}
+                  canEdit={canEdit}
+                  highlightExcerpt={
+                    highlightTarget?.sectionId === section.id
+                      ? highlightTarget.excerpt
+                      : ""
+                  }
+                  onChange={(body) => updateSection(section.id, { body })}
+                />
+                {overflowLabels.length > 0 && (
+                  <p className="mt-2 text-xs font-medium text-amber-700">
+                    Everything after this will not fit{" "}
+                    {overflowLabels.join(", ")}.
+                  </p>
+                )}
+              </>
             ) : (
               <ImageSection
                 altText={section.alt_text ?? ""}
@@ -593,7 +631,8 @@ export function ContentEditor({
               />
             )}
           </article>
-        ))}
+          );
+        })}
       </section>
 
       {canEdit && (
@@ -683,6 +722,7 @@ export function ContentEditor({
             initialFindings={initialFindings}
             initialStats={initialStats}
             initialAiCallsToday={initialAiCallsToday}
+            platformFit={platformFit}
             onCommentsRefresh={refreshComments}
             onFocusExcerpt={focusExcerpt}
             onSectionsApplied={acceptAppliedSections}
@@ -729,6 +769,14 @@ export function ContentEditor({
 
 function sameSections(a: ContentSection[], b: ContentSection[]): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function platformChipClass(row: PlatformFitRow): string {
+  if (row.over) return "bg-red-100 text-red-800";
+  if (row.limit !== null && row.count >= row.limit * 0.9) {
+    return "bg-amber-100 text-amber-800";
+  }
+  return "bg-zinc-100 text-zinc-600";
 }
 
 function TextSection({

@@ -1,8 +1,7 @@
 import { Suspense } from "react";
 import { connection } from "next/server";
-import { redirect } from "next/navigation";
 import Link from "next/link";
-import { getCurrentMember } from "@/lib/auth/current-member";
+import { requireMember } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { AppNav } from "@/components/app-nav";
 
@@ -44,11 +43,14 @@ export default function WorkspacePage() {
 
 async function WorkspaceContent() {
   await connection();
-  const member = await getCurrentMember();
+  const { user, membership } = await requireMember();
 
-  if (!member) {
-    redirect("/login");
-  }
+  const member = {
+    email: user.email ?? "",
+    orgId: membership.org_id,
+    role: membership.role,
+    userId: user.id,
+  };
 
   const supabase = await createClient();
   const { data: contents, error } = await supabase

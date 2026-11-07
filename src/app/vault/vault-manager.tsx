@@ -51,7 +51,7 @@ export function VaultManager({
 }: {
   items: VaultItem[];
   initialEditingItemId?: string;
-  brandKit: { id: string; kit: BrandKit; body: string } | null;
+  brandKit: { id: string; kit: BrandKit; body: string; isConfidential?: boolean } | null;
   canManage: boolean;
 }) {
   const router = useRouter();
@@ -310,6 +310,7 @@ export function VaultManager({
         <BrandKitPanel
           canManage={canManage}
           initialKit={brandKit?.kit ?? null}
+          isConfidential={brandKit?.isConfidential ?? false}
           renderedRules={brandKit?.body ?? ""}
         />
       ) : (
@@ -486,7 +487,8 @@ function isExpired(value: string): boolean {
 
 function formatDate(value: string): string {
   const date = new Date(`${value}T00:00:00.000Z`);
-  return new Intl.DateTimeFormat(undefined, {
+  // A fixed locale keeps the server and client output identical (hydration).
+  return new Intl.DateTimeFormat("en-GB", {
     dateStyle: "medium",
     timeZone: "UTC",
   }).format(date);

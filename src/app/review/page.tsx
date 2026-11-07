@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { getCurrentMember } from "@/lib/auth/current-member";
+import { requireMember } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { AppNav } from "@/components/app-nav";
 
@@ -51,13 +51,18 @@ export default function ReviewPage({ searchParams }: ReviewPageProps) {
 
 async function ReviewQueue({ searchParams }: ReviewPageProps) {
   await connection();
-  const member = await getCurrentMember();
-  if (!member) {
-    redirect("/login");
-  }
-  if (member.role === "creator") {
+  const { user, membership } = await requireMember();
+
+  if (membership.role === "creator") {
     redirect("/workspace");
   }
+
+  const member = {
+    email: user.email ?? "",
+    orgId: membership.org_id,
+    role: membership.role,
+    userId: user.id,
+  };
 
   const params = await searchParams;
   const selectedStatus = queueTabs.some((tab) => tab.status === params.status)

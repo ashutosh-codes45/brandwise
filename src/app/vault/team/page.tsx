@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { getCurrentMember } from "@/lib/auth/current-member";
+import { requireMember } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { AppNav } from "@/components/app-nav";
 import { TeamAccess } from "./team-access";
@@ -29,14 +29,18 @@ export default function TeamPage() {
 
 async function TeamContent() {
   await connection();
-  const member = await getCurrentMember();
+  const { user, membership } = await requireMember();
 
-  if (!member) {
-    redirect("/login");
+  if (membership.role !== "brand_manager") {
+    redirect(membership.role === "reviewer" ? "/review" : "/workspace");
   }
-  if (member.role !== "brand_manager") {
-    redirect("/workspace");
-  }
+
+  const member = {
+    email: user.email ?? "",
+    orgId: membership.org_id,
+    role: membership.role,
+    userId: user.id,
+  };
 
   const supabase = await createClient();
   const [{ data: members, error: membersError }, { data: invites, error: invitesError }] =

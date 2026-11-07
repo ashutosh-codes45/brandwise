@@ -3,39 +3,28 @@
 import Link from "next/link";
 import { useState, useTransition, type FormEvent } from "react";
 import { signIn } from "./actions";
-import {
-  isMemberRole,
-  memberRoles,
-  type MemberRole,
-} from "@/lib/auth/roles";
-
-const roleLabels: Record<MemberRole, string> = {
-  brand_manager: "Brand Manager",
-  creator: "Creator",
-  reviewer: "Reviewer",
-};
+import { AuthNoticeBanner } from "@/components/auth-notice";
+import { getAuthNotice } from "@/lib/auth/notices";
 
 export function LoginForm({
-  message,
-  initialError,
+  initialNotice,
 }: {
-  message?: string;
-  initialError?: string;
+  initialNotice?: string;
 }) {
-  const [role, setRole] = useState<MemberRole>("brand_manager");
-  const [error, setError] = useState(initialError ?? "");
+  const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  const notice = error ? null : getAuthNotice(initialNotice);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    setError("");
+    setError(null);
 
     startTransition(async () => {
       const result = await signIn(
         formData.get("email"),
-        formData.get("password"),
-        role
+        formData.get("password")
       );
       if (result) {
         setError(result);
@@ -53,11 +42,13 @@ export function LoginForm({
           Access your organisation workspace.
         </p>
 
-        {message && (
-          <p className="mt-5 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-            {message}
-          </p>
-        )}
+        <div className="mt-5">
+          {error ? (
+            <AuthNoticeBanner message={error} type="error" />
+          ) : notice ? (
+            <AuthNoticeBanner message={notice.message} type={notice.type} />
+          ) : null}
+        </div>
 
         <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
           <div>
@@ -69,7 +60,8 @@ export function LoginForm({
             </label>
             <input
               autoComplete="email"
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-zinc-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+              className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-zinc-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-zinc-50"
+              disabled={isPending}
               id="email"
               name="email"
               required
@@ -86,45 +78,14 @@ export function LoginForm({
             </label>
             <input
               autoComplete="current-password"
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-zinc-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+              className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-zinc-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-zinc-50"
+              disabled={isPending}
               id="password"
               name="password"
               required
               type="password"
             />
           </div>
-
-          <div>
-            <label
-              className="mb-1.5 block text-sm font-medium text-zinc-700"
-              htmlFor="role"
-            >
-              Sign in as
-            </label>
-            <select
-              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-zinc-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-              id="role"
-              name="role"
-              onChange={(event) => {
-                if (isMemberRole(event.target.value)) {
-                  setRole(event.target.value);
-                }
-              }}
-              value={role}
-            >
-              {memberRoles.map((memberRole) => (
-                <option key={memberRole} value={memberRole}>
-                  {roleLabels[memberRole]}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {error && (
-            <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
-              {error}
-            </p>
-          )}
 
           <button
             className="w-full rounded-lg bg-indigo-600 px-4 py-2.5 font-medium text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
@@ -137,7 +98,10 @@ export function LoginForm({
 
         <p className="mt-6 text-center text-sm text-zinc-600">
           New to BrandWise?{" "}
-          <Link className="font-medium text-indigo-600 hover:text-indigo-700" href="/signup">
+          <Link
+            className="font-medium text-indigo-600 hover:text-indigo-700"
+            href="/signup"
+          >
             Create an account
           </Link>
         </p>

@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { getCurrentMember } from "@/lib/auth/current-member";
+import { requireMember } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { AppNav } from "@/components/app-nav";
 import { VaultManager } from "./vault-manager";
@@ -38,13 +38,22 @@ async function VaultContent({
   searchParams: Promise<{ edit?: string | string[] }>;
 }) {
   await connection();
+  const { user, membership } = await requireMember();
+
+  if (membership.role !== "brand_manager") {
+    redirect(membership.role === "reviewer" ? "/review" : "/workspace");
+  }
+
+  const member = {
+    email: user.email ?? "",
+    orgId: membership.org_id,
+    role: membership.role,
+    userId: user.id,
+  };
+
   const params = await searchParams;
   const editParam = Array.isArray(params.edit) ? params.edit[0] : params.edit;
-  const member = await getCurrentMember();
 
-  if (!member) {
-    redirect("/login");
-  }
   const supabase = await createClient();
   const { data: items, error } = await supabase
     .from("vault_items")

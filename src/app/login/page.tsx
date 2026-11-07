@@ -5,9 +5,11 @@ export const instant = false;
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ message?: string; error?: string }>;
+  searchParams: Promise<{ notice?: string; message?: string; error?: string }>;
 }) {
-  const { message, error } = await searchParams;
+  const { notice, message, error } = await searchParams;
+  // If notice is not provided, fall back to allowlisted keys or ignore unvalidated parameters
+  const effectiveNotice = notice ?? (error ? undefined : message ? "account_created" : undefined);
 
-  return <LoginForm message={message} initialError={error} />;
+  return <LoginForm initialNotice={effectiveNotice} />;
 }

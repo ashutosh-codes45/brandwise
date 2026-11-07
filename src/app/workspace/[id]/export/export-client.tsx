@@ -21,6 +21,8 @@ export type ExportHistoryItem = {
   created_at: string;
 };
 
+export type PlatformRecap = { message: string; over: boolean };
+
 export function ExportClient({
   contentId,
   title,
@@ -29,6 +31,7 @@ export function ExportClient({
   platforms,
   results,
   imagePaths,
+  recaps,
   history,
 }: {
   contentId: string;
@@ -38,6 +41,7 @@ export function ExportClient({
   platforms: PlatformKey[];
   results: Partial<Record<PlatformKey, ExportView>>;
   imagePaths: Array<{ image_path: string | null; alt_text: string }>;
+  recaps: Partial<Record<PlatformKey, PlatformRecap>>;
   history: ExportHistoryItem[];
 }) {
   const router = useRouter();
@@ -48,6 +52,7 @@ export function ExportClient({
   const [thread, setThread] = useState<ReturnType<typeof splitIntoThread> | null>(null);
   const [isPending, startTransition] = useTransition();
   const result = results[active];
+  const recap = recaps[active];
   const previewHtml = result?.html?.replace(
     /<img src="\{\{IMAGE_(\d+)_URL\}\}" alt="([^"]*)">/g,
     (_match, imageIndex: string, alt: string) => {
@@ -199,7 +204,9 @@ export function ExportClient({
                 {active} preview
               </h2>
               <p className={`mt-1 text-sm ${result.overLimit ? "font-semibold text-red-700" : "text-zinc-600"}`}>
-                {result.count.toLocaleString()} / {result.limit?.toLocaleString() ?? "No limit"} characters
+                {result.limit === null
+                  ? `${result.count.toLocaleString()} characters (no limit)`
+                  : `${result.count.toLocaleString()} / ${result.limit.toLocaleString()}`}
                 {" "}(approximate, the platform may count differently)
               </p>
             </div>
@@ -263,13 +270,16 @@ export function ExportClient({
               </ul>
             </div>
           )}
-          {result.warnings.length > 0 && (
-            <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-4">
-              <h3 className="text-sm font-semibold text-amber-900">Warnings</h3>
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-900">
-                {result.warnings.map((warning) => <li key={warning}>{warning}</li>)}
-              </ul>
-            </div>
+          {recap && (
+            <p
+              className={`mt-5 text-sm ${
+                recap.over
+                  ? "font-medium text-red-700"
+                  : "font-medium text-emerald-700"
+              }`}
+            >
+              {recap.message}
+            </p>
           )}
 
           {active === "X (Twitter)" && result.overLimit && (

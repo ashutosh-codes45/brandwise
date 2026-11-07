@@ -23,14 +23,15 @@ export type VaultSource = {
 };
 
 export type ReviewFinding = {
-  section_id: string;
+  section_id: string | null;
   category:
     | "claim"
     | "outdated"
     | "voice"
     | "terminology"
     | "visual"
-    | "accessibility";
+    | "accessibility"
+    | "platform";
   severity: "blocker" | "fix" | "info";
   excerpt: string;
   reason: string;

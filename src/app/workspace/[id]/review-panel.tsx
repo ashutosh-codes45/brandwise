@@ -10,6 +10,15 @@ import {
 } from "./review-actions";
 import type { ReviewFindingState } from "@/lib/review/types";
 import { dailyAiCallLimit } from "@/lib/review/usage";
+import { EXPORT_PLATFORMS } from "@/lib/export/platforms";
+import {
+  PLATFORM_OVER_LIMIT_RULE_ID,
+  formatPlatformCount,
+  platformKeyFromLabel,
+  platformLabelFromSource,
+  type DiffToken,
+  type PlatformFitRow,
+} from "@/lib/review/platform-rules";
 import {
   CommentThread,
 } from "./comments-panel";
@@ -34,6 +43,14 @@ const severityStyles: Record<string, string> = {
   info: "bg-blue-100 text-blue-800",
 };
 
+type PlatformPreview = {
+  label: string;
+  limit: number;
+  count: number;
+  overBy: number;
+  diff: DiffToken[];
+};
+
 export function ReviewPanel({
   contentId,
   sectionLabels,
@@ -42,6 +59,7 @@ export function ReviewPanel({
   initialFindings,
   initialStats,
   initialAiCallsToday,
+  platformFit,
   comments,
   currentUserId,
   onCommentsRefresh,
@@ -55,6 +73,7 @@ export function ReviewPanel({
   initialFindings: ReviewFindingState[];
   initialStats: Record<string, unknown> | null;
   initialAiCallsToday: number;
+  platformFit: PlatformFitRow[];
   comments: ContentComment[];
   currentUserId: string;
   onCommentsRefresh: () => Promise<void>;
@@ -76,6 +95,9 @@ export function ReviewPanel({
   );
   const [feedback, setFeedback] = useState("");
   const [isError, setIsError] = useState(false);
+  const [platformPreviews, setPlatformPreviews] = useState<
+    Record<string, PlatformPreview>
+  >({});
   const [isPending, startTransition] = useTransition();
   const openFindings = findings.filter((finding) => finding.status === "open");
   const applicableFindings = openFindings.filter(
@@ -87,12 +109,17 @@ export function ReviewPanel({
   const sectionName = new Map(
     sectionLabels.map((section) => [section.id, section.label])
   );
+  const platformFindings = openFindings.filter(
+    (finding) => finding.category === "platform"
+  );
   const groupedOpenFindings = [
-    ...openFindings.reduce((groups, finding) => {
-      const key = finding.section_id ?? "";
-      groups.set(key, [...(groups.get(key) ?? []), finding]);
-      return groups;
-    }, new Map<string, ReviewFindingState[]>()),
+    ...openFindings
+      .filter((finding) => finding.category !== "platform")
+      .reduce((groups, finding) => {
+        const key = finding.section_id ?? "";
+        groups.set(key, [...(groups.get(key) ?? []), finding]);
+        return groups;
+      }, new Map<string, ReviewFindingState[]>()),
   ];
   const missingSourceDrops =
     typeof stats?.drop_reasons === "object" &&
@@ -292,6 +319,37 @@ export function ReviewPanel({
     });
   }
 
+  function shortenWithAI(
+    finding: ReviewFindingState,
+    label: string,
+    limit: number
+  ) {
+    const instruction = `Shorten to fit ${label}'s ${limit}-character limit. Keep every fact, number and approved term. Do not add new claims.`;
+    startTransition(async () => {
+      const result = await refineFindingAction(finding.id, instruction);
+      if ("error" in result) {
+        setFeedback(result.error);
+        setIsError(true);
+        return;
+      }
+      if (result.platform) {
+        setPlatformPreviews((current) => ({
+          ...current,
+          [finding.id]: result.platform as PlatformPreview,
+        }));
+        setFeedback(
+          result.platform.overBy > 0
+            ? "Still over the limit. Shorten again or edit the text by hand."
+            : "Shortened to fit. Review the diff before applying."
+        );
+      } else {
+        setFeedback("Suggestion shortened. Review it before applying.");
+      }
+      setIsError(false);
+      loadLatest();
+    });
+  }
+
   const counted = (key: string) =>
     typeof stats?.[key] === "number" ? (stats[key] as number) : 0;
 
@@ -335,6 +393,49 @@ export function ReviewPanel({
           <p className="mt-1 text-right text-xs text-amber-700">
             Daily AI call limit reached. Try again tomorrow.
           </p>
+        )}
+
+        {platformFit.length > 0 && (
+          <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                Platform fit
+              </h3>
+              <span className="text-[11px] text-zinc-500">
+                approximate; the platform may count differently
+              </span>
+            </div>
+            <ul className="mt-2 space-y-1.5">
+              {platformFit.map((row) => (
+                <li
+                  className="flex flex-wrap items-center justify-between gap-2 text-sm"
+                  key={row.platform}
+                >
+                  <span className="flex items-center gap-2">
+                    <span
+                      aria-hidden
+                      className={row.over ? "text-red-600" : "text-emerald-600"}
+                    >
+                      {row.over ? "\u2715" : "\u2713"}
+                    </span>
+                    <span className="font-medium text-zinc-800">
+                      {row.label}
+                    </span>
+                  </span>
+                  <span
+                    className={
+                      row.over
+                        ? "font-semibold text-red-700"
+                        : "text-zinc-600"
+                    }
+                  >
+                    {formatPlatformCount(row)} · {row.hashtags} hashtag
+                    {row.hashtags === 1 ? "" : "s"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
         {typeof stats?.ai_skipped_reason === "string" && (
           <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800" role="status">
@@ -431,12 +532,34 @@ export function ReviewPanel({
         )}
 
         <div className="mt-4 space-y-3">
-          {groupedOpenFindings.map(([sectionId, sectionFindings]) => (
+          {[
+            ...(platformFindings.length > 0
+              ? [["platform", platformFindings] as [string, ReviewFindingState[]]]
+              : []),
+            ...groupedOpenFindings,
+          ].map(([sectionId, sectionFindings]) => (
             <div className="space-y-3" key={sectionId}>
               <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                {sectionName.get(sectionId) ?? "General"}
+                {sectionId === "platform"
+                  ? "Platform fit"
+                  : sectionName.get(sectionId) ?? "General"}
               </h3>
-              {sectionFindings.map((finding) => (
+              {sectionFindings.map((finding) => {
+                const platformLabel =
+                  finding.category === "platform"
+                    ? platformLabelFromSource(finding.source_label)
+                    : null;
+                const platformKey = platformLabel
+                  ? platformKeyFromLabel(platformLabel)
+                  : null;
+                const platformMax = platformKey
+                  ? EXPORT_PLATFORMS[platformKey].maxChars
+                  : null;
+                const isPlatformShorten =
+                  finding.category === "platform" &&
+                  finding.rule_id === PLATFORM_OVER_LIMIT_RULE_ID;
+                const preview = platformPreviews[finding.id];
+                return (
             <article
               className="rounded-xl border border-zinc-200 p-3"
               key={finding.id}
@@ -467,6 +590,11 @@ export function ReviewPanel({
                 <span className="text-xs font-medium capitalize text-zinc-700">
                   {finding.category}
                 </span>
+                {platformLabel && (
+                  <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-medium text-indigo-800">
+                    {platformLabel}
+                  </span>
+                )}
                 <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-600">
                   {finding.origin === "rule" ? "Rule" : "AI suggestion"}
                 </span>
@@ -526,6 +654,52 @@ export function ReviewPanel({
                   </p>
                 )}
               </div>
+
+              {editable &&
+                isPlatformShorten &&
+                platformLabel &&
+                platformMax !== null && (
+                  <div className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50/60 p-3">
+                    <p className="text-xs leading-5 text-indigo-900">
+                      {`Shorten to fit ${platformLabel}'s ${platformMax}-character limit. Keep every fact, number and approved term. Do not add new claims.`}
+                    </p>
+                    <button
+                      className="mt-2 rounded-md border border-indigo-300 px-2.5 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+                      disabled={isPending || aiCallsToday >= dailyAiCallLimit}
+                      onClick={() =>
+                        shortenWithAI(finding, platformLabel, platformMax)
+                      }
+                      type="button"
+                    >
+                      {isPending ? "Shortening..." : "Shorten with AI"}
+                    </button>
+                    {preview && (
+                      <div className="mt-3">
+                        <p
+                          className={
+                            preview.overBy > 0
+                              ? "text-xs font-semibold text-amber-800"
+                              : "text-xs font-medium text-emerald-800"
+                          }
+                        >
+                          {preview.overBy > 0
+                            ? `Still over by ${preview.overBy} character${preview.overBy === 1 ? "" : "s"}. Shorten again or edit the text by hand.`
+                            : `Within ${platformLabel}'s ${platformMax}-character limit (${preview.count}). Tick the suggestion below to apply it.`}
+                        </p>
+                        <p className="mt-2 whitespace-pre-wrap text-sm leading-5 text-zinc-800">
+                          {preview.diff.map((token, tokenIndex) => (
+                            <span
+                              className={token.removed ? "text-red-600 line-through" : undefined}
+                              key={`${tokenIndex}-${token.value}`}
+                            >
+                              {token.value}{" "}
+                            </span>
+                          ))}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
 
               <div className="mt-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -666,7 +840,8 @@ export function ReviewPanel({
                 </ol>
               </details>
             </article>
-              ))}
+                );
+              })}
             </div>
           ))}
           {openFindings.length === 0 && (

@@ -2,12 +2,21 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import {
+  PLATFORM_OVER_LIMIT_RULE_ID,
+  platformLabelFromSource,
+} from "@/lib/review/platform-rules";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type TransitionResult =
-  | { error: string; requiresAcknowledgement?: boolean; openBlockers?: number }
+  | {
+      error: string;
+      requiresAcknowledgement?: boolean;
+      openBlockers?: number;
+      overLimitPlatforms?: string[];
+    }
   | { status: string };
 
 type WorkflowContext =
@@ -83,6 +92,27 @@ async function openBlockerCount(
     .eq("status", "open")
     .eq("severity", "blocker");
   return error ? error.message : count ?? 0;
+}
+
+async function openOverLimitPlatforms(
+  context: Extract<WorkflowContext, { supabase: unknown }>
+): Promise<string[] | string> {
+  const { data, error } = await context.supabase
+    .from("findings")
+    .select("source_label")
+    .eq("org_id", context.orgId)
+    .eq("content_id", context.content.id)
+    .eq("status", "open")
+    .eq("severity", "blocker")
+    .eq("category", "platform")
+    .eq("rule_id", PLATFORM_OVER_LIMIT_RULE_ID);
+  if (error) {
+    return error.message;
+  }
+  const labels = (data ?? [])
+    .map((row) => platformLabelFromSource(row.source_label))
+    .filter((label): label is string => Boolean(label));
+  return [...new Set(labels)];
 }
 
 async function latestReviewIsCurrent(
@@ -169,10 +199,19 @@ export async function submitForReview(
     return { error: blockers };
   }
   if (blockers > 0 && !ackBlockers) {
+    const overLimit = await openOverLimitPlatforms(context);
+    if (typeof overLimit === "string") {
+      return { error: overLimit };
+    }
+    const platformNote =
+      overLimit.length > 0
+        ? ` (${overLimit.join(", ")} over the platform limit)`
+        : "";
     return {
-      error: `There are ${blockers} open blocker${blockers === 1 ? "" : "s"}. Confirm submission to continue.`,
+      error: `There are ${blockers} open blocker${blockers === 1 ? "" : "s"}${platformNote}. Confirm submission to continue.`,
       requiresAcknowledgement: true,
       openBlockers: blockers,
+      overLimitPlatforms: overLimit,
     };
   }
 

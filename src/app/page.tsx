@@ -1,38 +1,24 @@
 import { redirect } from "next/navigation";
-import { getCurrentMember } from "@/lib/auth/current-member";
-import { createClient } from "@/lib/supabase/server";
+import { getSessionContext } from "@/lib/auth/session";
 
 export const instant = false;
 
 export default async function Home() {
-  const member = await getCurrentMember();
+  const { user, membership } = await getSessionContext();
 
-  if (member) {
-    redirect(
-      member.role === "brand_manager"
-        ? "/vault"
-        : member.role === "reviewer"
-          ? "/review"
-          : "/workspace"
-    );
+  if (!user) {
+    redirect("/login");
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-
-  if (error) {
-    throw new Error(error.message);
+  if (!membership) {
+    redirect("/onboarding");
   }
 
-  if (user) {
-    const { error: signOutError } = await supabase.auth.signOut();
-    if (signOutError) {
-      throw new Error(signOutError.message);
-    }
-  }
-
-  redirect("/login");
+  redirect(
+    membership.role === "brand_manager"
+      ? "/vault"
+      : membership.role === "reviewer"
+        ? "/review"
+        : "/workspace"
+  );
 }

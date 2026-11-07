@@ -1,10 +1,10 @@
 import { Suspense } from "react";
 import { connection } from "next/server";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { AppNav } from "@/components/app-nav";
-import { getCurrentMember } from "@/lib/auth/current-member";
+import { requireMember } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { htmlToText } from "@/lib/html-to-text";
 
@@ -47,10 +47,15 @@ export default function VersionPage({ params }: VersionPageProps) {
 async function VersionContent({ params }: VersionPageProps) {
   await connection();
   const { id, versionId } = await params;
-  const member = await getCurrentMember();
-  if (!member) {
-    redirect("/login");
-  }
+  const { user, membership } = await requireMember();
+
+  const member = {
+    email: user.email ?? "",
+    orgId: membership.org_id,
+    role: membership.role,
+    userId: user.id,
+  };
+
   const supabase = await createClient();
   const { data: content, error: contentError } = await supabase
     .from("contents")

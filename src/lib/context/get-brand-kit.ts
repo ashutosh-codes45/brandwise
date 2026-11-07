@@ -1,17 +1,18 @@
 import "server-only";
 
-import { brandKitSchema } from "./brand-kit";
+import { brandKitSchema, normalizeBrandKitData } from "./brand-kit";
 import { createClient } from "@/lib/supabase/server";
 
 export async function getBrandKit(orgId: string): Promise<{
   id: string;
   kit: ReturnType<typeof brandKitSchema.parse>;
   body: string;
+  isConfidential: boolean;
 } | null> {
   const supabase = await createClient();
   const { data: item, error } = await supabase
     .from("vault_items")
-    .select("id, structured, body")
+    .select("id, structured, body, is_confidential")
     .eq("org_id", orgId)
     .contains("tags", ["brand-kit"])
     .maybeSingle();
@@ -23,9 +24,17 @@ export async function getBrandKit(orgId: string): Promise<{
     return null;
   }
 
-  const parsed = brandKitSchema.safeParse(item.structured);
+  const normalized = normalizeBrandKitData(item.structured);
+  const parsed = brandKitSchema.safeParse(normalized);
   if (!parsed.success) {
-    throw new Error("The saved Brand kit is invalid. Ask a Brand Manager to update it.");
+    throw new Error(
+      "The saved Brand kit is invalid. Ask a Brand Manager to update it."
+    );
   }
-  return { id: item.id, kit: parsed.data, body: item.body ?? "" };
+  return {
+    id: item.id,
+    kit: parsed.data,
+    body: item.body ?? "",
+    isConfidential: Boolean(item.is_confidential),
+  };
 }
