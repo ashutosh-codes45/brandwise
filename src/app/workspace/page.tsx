@@ -89,14 +89,12 @@ async function WorkspaceContent() {
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
-          {member.role === "creator" && (
-            <Link
-              className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700"
-              href="/workspace/new"
-            >
-              New content
-            </Link>
-          )}
+          <Link
+            className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700"
+            href="/workspace/new"
+          >
+            New content
+          </Link>
         </div>
       </header>
 
@@ -105,9 +103,17 @@ async function WorkspaceContent() {
           <h2 className="font-semibold text-zinc-900">Content</h2>
         </div>
         {orderedContents.length === 0 ? (
-          <p className="px-5 py-10 text-center text-sm text-zinc-500">
-            No content yet. Create a draft to get started.
-          </p>
+          <div className="flex flex-col items-center gap-4 px-5 py-10 text-center">
+            <p className="text-sm text-zinc-500">
+              No content yet. Create a draft to get started.
+            </p>
+            <Link
+              className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700"
+              href="/workspace/new"
+            >
+              New content
+            </Link>
+          </div>
         ) : (
           <ul className="divide-y divide-zinc-100">
             {orderedContents.map((content) => (

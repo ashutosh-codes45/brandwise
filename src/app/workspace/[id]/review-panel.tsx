@@ -9,6 +9,7 @@ import {
   runReviewAction,
 } from "./review-actions";
 import type { ReviewFindingState } from "@/lib/review/types";
+import { dailyAiCallLimit } from "@/lib/review/usage";
 import {
   CommentThread,
 } from "./comments-panel";
@@ -36,6 +37,7 @@ export function ReviewPanel({
   unsavedChanges,
   initialFindings,
   initialStats,
+  initialAiCallsToday,
   comments,
   currentUserId,
   onCommentsRefresh,
@@ -48,6 +50,7 @@ export function ReviewPanel({
   unsavedChanges: boolean;
   initialFindings: ReviewFindingState[];
   initialStats: Record<string, unknown> | null;
+  initialAiCallsToday: number;
   comments: ContentComment[];
   currentUserId: string;
   onCommentsRefresh: () => Promise<void>;
@@ -58,6 +61,7 @@ export function ReviewPanel({
   const [stats, setStats] = useState<Record<string, unknown> | null>(
     initialStats
   );
+  const [aiCallsToday, setAiCallsToday] = useState(initialAiCallsToday);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [refinementPrompts, setRefinementPrompts] = useState<
@@ -101,6 +105,7 @@ export function ReviewPanel({
       }
       setFindings(state.findings);
       setStats(state.stats);
+      setAiCallsToday(state.aiCallsToday);
       setSelectedIds([]);
     });
   }
@@ -137,7 +142,11 @@ export function ReviewPanel({
       });
       setOverrides({});
       setSelectedIds([]);
-      setFeedback("Review complete.");
+      setFeedback(
+        result.stats.ai_skipped_reason
+          ? "Rule-based findings saved; see the AI checks notice below."
+          : "Review complete."
+      );
       setIsError(false);
       loadLatest();
     });
@@ -217,6 +226,7 @@ export function ReviewPanel({
       if ("error" in result) {
         setFeedback(result.error);
         setIsError(true);
+        loadLatest();
         return;
       }
       setFindings((current) =>
@@ -267,22 +277,58 @@ export function ReviewPanel({
               approve fixes before they change your draft.
             </p>
           </div>
-          {editable && (
-            <button
-              className="shrink-0 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={isPending || unsavedChanges}
-              onClick={runReview}
-              title={
-                unsavedChanges
-                  ? "Save your changes before running a review."
-                  : "Run rule checks and AI review"
-              }
-              type="button"
-            >
-              {isPending ? "Working..." : "Run review"}
-            </button>
-          )}
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <span className="text-xs text-zinc-500">
+              AI calls today: {aiCallsToday} / {dailyAiCallLimit} (free tier)
+            </span>
+            {editable && (
+              <button
+                className="shrink-0 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={
+                  isPending || unsavedChanges || aiCallsToday >= dailyAiCallLimit
+                }
+                onClick={runReview}
+                title={
+                  unsavedChanges
+                    ? "Save your changes before running a review."
+                    : aiCallsToday >= dailyAiCallLimit
+                      ? "Daily free-tier AI call limit reached."
+                      : "Run rule checks and AI review"
+                }
+                type="button"
+              >
+                {isPending ? "Working..." : "Run review"}
+              </button>
+            )}
+          </div>
         </div>
+        {aiCallsToday >= dailyAiCallLimit && (
+          <p className="mt-1 text-right text-xs text-amber-700">
+            Daily AI call limit reached. Try again tomorrow.
+          </p>
+        )}
+        {typeof stats?.ai_skipped_reason === "string" && (
+          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800" role="status">
+            AI checks were skipped: {stats.ai_skipped_reason}
+          </p>
+        )}
+
+        {stats && (
+          <div className="mt-3 space-y-1 text-xs text-zinc-600">
+            <p>
+              Judged by:{" "}
+              {stats.judge_provider === "gemini"
+                ? `Gemini${typeof stats.fallback_reason === "string" ? ` (fallback: ${stats.fallback_reason})` : ""}`
+                : stats.judge_provider === "groq"
+                  ? `Groq${typeof stats.fallback_reason === "string" ? ` (fallback: ${stats.fallback_reason})` : ""}`
+                  : "None"}
+            </p>
+            <p>
+              Retrieval:{" "}
+              {stats.retrieval_mode === "text_search" ? "text search" : "vector"}
+            </p>
+          </div>
+        )}
 
         {stats && (
           <div className="mt-4 grid grid-cols-3 gap-2 rounded-lg bg-zinc-50 p-3 text-center">
@@ -516,7 +562,11 @@ export function ReviewPanel({
                   </label>
                   <button
                     className="mt-2 rounded-md border border-indigo-200 px-2.5 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
-                    disabled={isPending || !refinementPrompts[finding.id]?.trim()}
+                    disabled={
+                      isPending ||
+                      aiCallsToday >= dailyAiCallLimit ||
+                      !refinementPrompts[finding.id]?.trim()
+                    }
                     onClick={() => refine(finding)}
                     type="button"
                   >

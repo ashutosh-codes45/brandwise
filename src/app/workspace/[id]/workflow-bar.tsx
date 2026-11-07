@@ -40,7 +40,7 @@ export function WorkflowBar({
   const [note, setNote] = useState("");
   const [feedback, setFeedback] = useState("");
   const [isPending, startTransition] = useTransition();
-  const canSend = role === "creator" && isCreator && (
+  const canSend = isCreator && (
     status === "draft" || status === "changes_requested"
   );
   const canRequest = (role === "reviewer" || role === "brand_manager") &&
@@ -134,7 +134,7 @@ export function WorkflowBar({
           >
             {statusNames[status] ?? status}
           </span>
-          {status === "changes_requested" && role === "creator" && latestChangeNote && (
+          {status === "changes_requested" && isCreator && latestChangeNote && (
             <p className="mt-3 max-w-3xl text-sm text-amber-800">
               <span className="font-semibold">Changes requested:</span>{" "}
               {latestChangeNote}

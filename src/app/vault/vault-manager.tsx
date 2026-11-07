@@ -190,6 +190,44 @@ export function VaultManager({
     });
   }
 
+  function handleTestAiConnection() {
+    setFeedback("");
+    startTransition(async () => {
+      try {
+        const response = await fetch("/api/ai-health", { method: "POST" });
+        const result: unknown = await response.json();
+        if (
+          typeof result !== "object" ||
+          result === null ||
+          !("ok" in result) ||
+          typeof result.ok !== "boolean"
+        ) {
+          throw new Error("AI connection test returned an invalid response.");
+        }
+        if (!result.ok) {
+          const error =
+            "error" in result && typeof result.error === "string"
+              ? result.error
+              : "Gemini connection failed.";
+          setFeedback(error);
+          setFeedbackIsError(true);
+          return;
+        }
+        const ms =
+          "ms" in result && typeof result.ms === "number" ? result.ms : null;
+        setFeedback(
+          `Gemini connection successful${ms === null ? "." : ` (${ms} ms).`}`
+        );
+        setFeedbackIsError(false);
+      } catch (error) {
+        setFeedback(
+          error instanceof Error ? error.message : "AI connection test failed."
+        );
+        setFeedbackIsError(true);
+      }
+    });
+  }
+
   return (
     <div>
       <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
@@ -202,6 +240,14 @@ export function VaultManager({
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
+          <button
+            className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+            disabled={isPending}
+            onClick={handleTestAiConnection}
+            type="button"
+          >
+            Test AI connection
+          </button>
           <button
             className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
             disabled={isPending}

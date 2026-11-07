@@ -74,6 +74,7 @@ export function ContentEditor({
   canEdit,
   initialFindings,
   initialStats,
+  initialAiCallsToday,
   initialComments,
   initialEvents,
   currentUserId,
@@ -86,6 +87,7 @@ export function ContentEditor({
   canEdit: boolean;
   initialFindings: ReviewFindingState[];
   initialStats: Record<string, unknown> | null;
+  initialAiCallsToday: number;
   initialComments: ContentComment[];
   initialEvents: ContentActivityEvent[];
   currentUserId: string;
@@ -618,6 +620,7 @@ export function ContentEditor({
             editable={canEdit}
             initialFindings={initialFindings}
             initialStats={initialStats}
+            initialAiCallsToday={initialAiCallsToday}
             onCommentsRefresh={refreshComments}
             onFocusExcerpt={focusExcerpt}
             onSectionsApplied={acceptAppliedSections}

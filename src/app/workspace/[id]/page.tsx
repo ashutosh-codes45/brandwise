@@ -11,6 +11,7 @@ import type { ContentComment } from "./comment-actions";
 import type { ContentActivityEvent } from "./activity-panel";
 
 export const instant = false;
+export const maxDuration = 60;
 
 type ContentPageProps = {
   params: Promise<{ id: string }>;
@@ -84,7 +85,6 @@ async function ContentPageContent({ params }: ContentPageProps) {
   }
 
   const canEdit =
-    membership.role === "creator" &&
     content.created_by === member.userId &&
     (content.status === "draft" || content.status === "changes_requested");
   const reviewState = await getReviewState(content.id);
@@ -139,6 +139,7 @@ async function ContentPageContent({ params }: ContentPageProps) {
         canEdit={canEdit}
         initialFindings={reviewState.findings}
         initialStats={reviewState.stats}
+        initialAiCallsToday={reviewState.aiCallsToday}
         initialComments={comments}
         initialEvents={events}
         currentUserId={member.userId}

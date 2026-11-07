@@ -8,16 +8,19 @@ export async function addCorrectionRecommendations(
   orgId: string,
   findings: ReviewFinding[]
 ): Promise<ReviewFinding[]> {
+  if (findings.length === 0) {
+    return [];
+  }
+  const vectors = await embed(
+    findings.map((finding) => `${finding.category}: ${finding.excerpt}`),
+    "RETRIEVAL_QUERY"
+  );
   const result: ReviewFinding[] = [];
 
-  for (const finding of findings) {
-    const vectors = await embed(
-      [`${finding.category}: ${finding.excerpt}`],
-      "RETRIEVAL_QUERY"
-    );
+  for (const [index, finding] of findings.entries()) {
     const { data, error } = await supabase.rpc("match_corrections", {
       org: orgId,
-      query_embedding: `[${vectors[0].join(",")}]`,
+      query_embedding: `[${vectors[index].join(",")}]`,
       category: finding.category,
       match_count: 1,
       min_similarity: 0.8,

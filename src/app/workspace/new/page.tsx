@@ -33,9 +33,6 @@ async function NewContentContent() {
   if (!member) {
     redirect("/login");
   }
-  if (member.role !== "creator") {
-    redirect("/workspace");
-  }
 
   return (
     <>

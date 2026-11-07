@@ -150,7 +150,7 @@ export async function submitForReview(
   if ("error" in context) {
     return context;
   }
-  if (context.role !== "creator" || context.content.created_by !== context.userId) {
+  if (context.content.created_by !== context.userId) {
     return { error: "Only the content creator can submit it for review." };
   }
 

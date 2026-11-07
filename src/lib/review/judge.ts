@@ -1,7 +1,7 @@
 import "server-only";
 
 import { z } from "zod";
-import { generateJson } from "@/lib/ai/provider";
+import { generateJsonWithProvider } from "@/lib/ai/provider";
 import { htmlToText } from "@/lib/html-to-text";
 import type { ReviewFinding, ReviewSection, VaultSource } from "./types";
 
@@ -32,12 +32,19 @@ const responseSchema = z.object({
 
 export type JudgeFinding = z.infer<typeof findingSchema>;
 
+export type JudgeResult = {
+  findings: JudgeFinding[];
+  provider: "gemini" | "groq";
+  fallbackReason: string | null;
+};
+
 export async function judgeSections(
   sections: ReviewSection[],
   sources: VaultSource[]
-): Promise<JudgeFinding[]> {
-  if (sources.length === 0) {
-    return [];
+): Promise<JudgeResult> {
+  const limitedSources = sources.slice(0, 6);
+  if (limitedSources.length === 0) {
+    throw new Error("No Vault items are available for AI review.");
   }
 
   const system = [
@@ -49,12 +56,12 @@ export async function judgeSections(
     "Return a JSON object with a findings array.",
   ].join(" ");
 
-  const sourceData = sources.map((source) => ({
+  const sourceData = limitedSources.map((source) => ({
     id: source.id,
     kind: source.kind,
     title: source.title,
     tags: source.tags,
-    body: source.body,
+    body: source.body?.slice(0, 1_500) ?? null,
     valid_until: source.valid_until,
     section_ids: source.section_ids,
   }));
@@ -75,7 +82,13 @@ export async function judgeSections(
     "END DRAFT DATA",
   ].join("\n");
 
-  return (await generateJson(system, user, responseSchema)).findings;
+  console.info(`[review] judge prompt size: ${system.length + user.length} characters`);
+  const result = await generateJsonWithProvider(system, user, responseSchema);
+  return {
+    findings: result.data.findings,
+    provider: result.provider,
+    fallbackReason: result.fallbackReason,
+  };
 }
 
 export function toAiFinding(

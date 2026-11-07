@@ -6,6 +6,12 @@ import { embed, generateJson } from "@/lib/ai/provider";
 import { htmlToText } from "@/lib/html-to-text";
 import { createClient } from "@/lib/supabase/server";
 import { runReview, type RunReviewResult } from "@/lib/review/run";
+import {
+  dailyAiCallLimit,
+  getAiUsage,
+  getAiUsageLimitMessage,
+  minuteAiCallLimit,
+} from "@/lib/review/usage";
 import { revalidatePath } from "next/cache";
 import type { ReviewFindingState } from "@/lib/review/types";
 
@@ -57,10 +63,10 @@ async function getEditableContext(
   if (membershipError) {
     return { ok: false, error: membershipError.message };
   }
-  if (!membership || membership.role !== "creator") {
+  if (!membership) {
     return {
       ok: false,
-      error: "Only a Creator can change review findings.",
+      error: "You have not been added to an organisation.",
     };
   }
 
@@ -188,6 +194,7 @@ export async function getReviewState(contentId: unknown): Promise<
   | {
       findings: ReviewFindingState[];
       stats: Record<string, unknown> | null;
+      aiCallsToday: number;
     }
 > {
   const parsedId = uuidSchema.safeParse(contentId);
@@ -218,6 +225,14 @@ export async function getReviewState(contentId: unknown): Promise<
   }
   if (!member) {
     return { error: "You have not been added to an organisation." };
+  }
+  let aiUsage: Awaited<ReturnType<typeof getAiUsage>>;
+  try {
+    aiUsage = await getAiUsage(supabase, member.org_id);
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Could not check AI usage.",
+    };
   }
 
   const { data: content, error: contentError } = await supabase
@@ -320,6 +335,7 @@ export async function getReviewState(contentId: unknown): Promise<
       };
     }),
     stats: run?.stats ?? null,
+    aiCallsToday: aiUsage.today,
   };
 }
 
@@ -647,8 +663,22 @@ export async function refineFindingAction(
   if (memberError) {
     return { error: memberError.message };
   }
-  if (!membership || membership.role !== "creator") {
-    return { error: "Only a Creator can refine review suggestions." };
+  if (!membership) {
+    return { error: "You have not been added to an organisation." };
+  }
+  let aiUsage: Awaited<ReturnType<typeof getAiUsage>>;
+  try {
+    aiUsage = await getAiUsage(supabase, membership.org_id);
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Could not check AI usage.",
+    };
+  }
+  if (
+    aiUsage.today >= dailyAiCallLimit ||
+    aiUsage.lastMinute >= minuteAiCallLimit
+  ) {
+    return { error: getAiUsageLimitMessage() };
   }
 
   const { data: finding, error: findingError } = await supabase
@@ -812,8 +842,8 @@ export async function dismissFindingAction(
   if (memberError) {
     return memberError.message;
   }
-  if (!membership || membership.role !== "creator") {
-    return "Only a Creator can dismiss review findings.";
+  if (!membership) {
+    return "You have not been added to an organisation.";
   }
 
   const { data: finding, error: findingError } = await supabase

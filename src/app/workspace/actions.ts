@@ -207,13 +207,6 @@ async function getEditableContent(
   contentId: string,
   context: Extract<WorkspaceContext, { ok: true }>
 ) {
-  if (context.role !== "creator") {
-    return {
-      ok: false,
-      error: "Only the content creator can edit this content.",
-    } as const;
-  }
-
   const { data: content, error } = await context.supabase
     .from("contents")
     .select("id, status, created_by")
@@ -258,9 +251,6 @@ export async function createContent(
   if (!context.ok) {
     return { error: context.error };
   }
-  if (context.role !== "creator") {
-    return { error: "Only Creators can create content." };
-  }
 
   const { data: content, error } = await context.supabase
     .from("contents")
@@ -271,7 +261,7 @@ export async function createContent(
       platforms: [],
       created_by: context.userId,
     })
-    .select("id")
+    .select("id, org_id")
     .single();
 
   if (error) {
@@ -281,7 +271,7 @@ export async function createContent(
   const { error: sectionError } = await context.supabase
     .from("content_sections")
     .insert({
-      org_id: context.orgId,
+      org_id: content.org_id,
       content_id: content.id,
       position: 0,
       type: "text",
@@ -295,7 +285,7 @@ export async function createContent(
       .from("contents")
       .delete()
       .eq("id", content.id)
-      .eq("org_id", context.orgId);
+      .eq("org_id", content.org_id);
     return {
       error: cleanupError
         ? `${sectionError.message} Content cleanup failed: ${cleanupError.message}`
