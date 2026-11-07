@@ -251,7 +251,7 @@ export async function getReviewState(contentId: unknown): Promise<
   const { data: findings, error: findingsError } = await supabase
     .from("findings")
     .select(
-      "id, run_id, section_id, category, severity, excerpt, reason, source_item_id, source_label, source_quote, suggestion, status, dismiss_reason, origin, rule_id, confidence, suggestion_origin, recommended_from_correction_id"
+      "id, run_id, section_id, category, severity, excerpt, reason, source_item_id, source_label, source_quote, suggestion, status, dismiss_reason, origin, rule_id, confidence, suggestion_origin, suggestion_kind, recommended_from_correction_id"
     )
     .eq("org_id", member.org_id)
     .eq("content_id", content.id)
@@ -339,6 +339,88 @@ export async function getReviewState(contentId: unknown): Promise<
   };
 }
 
+export async function markManualFindingFixedAction(
+  findingIdValue: unknown
+): Promise<{ error: string } | { success: true }> {
+  const parsedId = uuidSchema.safeParse(findingIdValue);
+  if (!parsedId.success) {
+    return { error: "Select a valid finding." };
+  }
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+  if (userError) {
+    return { error: userError.message };
+  }
+  if (!user) {
+    return { error: "Sign in to update findings." };
+  }
+  const { data: membership, error: membershipError } = await supabase
+    .from("members")
+    .select("org_id")
+    .eq("user_id", user.id)
+    .limit(1)
+    .maybeSingle();
+  if (membershipError) {
+    return { error: membershipError.message };
+  }
+  if (!membership) {
+    return { error: "You have not been added to an organisation." };
+  }
+
+  const { data: finding, error: findingError } = await supabase
+    .from("findings")
+    .select("id, content_id, status, suggestion_kind")
+    .eq("id", parsedId.data)
+    .eq("org_id", membership.org_id)
+    .maybeSingle();
+  if (findingError) {
+    return { error: findingError.message };
+  }
+  if (
+    !finding ||
+    finding.status !== "open" ||
+    finding.suggestion_kind !== "manual"
+  ) {
+    return { error: "Open manual finding not found." };
+  }
+
+  const context = await getEditableContext(finding.content_id);
+  if (!context.ok) {
+    return { error: context.error };
+  }
+  const { data: updated, error: updateError } = await supabase
+    .from("findings")
+    .update({ status: "applied" })
+    .eq("id", finding.id)
+    .eq("org_id", membership.org_id)
+    .eq("content_id", context.contentId)
+    .eq("status", "open")
+    .select("id")
+    .maybeSingle();
+  if (updateError) {
+    return { error: updateError.message };
+  }
+  if (!updated) {
+    return { error: "This finding has already been resolved." };
+  }
+  const eventError = await insertEvent(context, {
+    findingId: finding.id,
+    actorType: "human",
+    name: "applied",
+    note: "Marked as fixed by a human.",
+  });
+  if (eventError) {
+    return {
+      error: `Finding was marked fixed, but its history could not be recorded: ${eventError}`,
+    };
+  }
+  revalidatePath(`/workspace/${context.contentId}`);
+  return { success: true };
+}
+
 export async function applyFindingsAction(
   contentIdValue: unknown,
   findingIdsValue: unknown,
@@ -354,6 +436,9 @@ export async function applyFindingsAction(
         body: string | null;
         image_path: string | null;
         alt_text: string | null;
+        image_role: "logo" | "graphic" | "photo" | null;
+        image_meta: import("@/lib/visual/analyze-image").ImageAnalysis | null;
+        placed_background: string | null;
         position: number;
       }>;
       warning?: string;
@@ -390,7 +475,7 @@ export async function applyFindingsAction(
   }
   const { data: sections, error: sectionsError } = await context.supabase
     .from("content_sections")
-    .select("id, type, body, image_path, alt_text, position")
+    .select("id, type, body, image_path, alt_text, image_role, image_meta, placed_background, position")
     .eq("org_id", context.orgId)
     .eq("content_id", context.contentId)
     .order("position", { ascending: true });
@@ -399,7 +484,7 @@ export async function applyFindingsAction(
   }
   const { data: findings, error: findingsError } = await context.supabase
     .from("findings")
-    .select("id, section_id, category, excerpt, suggestion, source_item_id, source_confidential, status")
+    .select("id, section_id, category, excerpt, suggestion, source_item_id, source_confidential, status, suggestion_kind")
     .eq("org_id", context.orgId)
     .eq("content_id", context.contentId)
     .in("id", ids.data);
@@ -424,7 +509,12 @@ export async function applyFindingsAction(
 
   for (const findingId of ids.data) {
     const finding = (findings ?? []).find((item) => item.id === findingId);
-    if (!finding || finding.status !== "open" || !finding.section_id) {
+    if (
+      !finding ||
+      finding.status !== "open" ||
+      finding.suggestion_kind === "manual" ||
+      !finding.section_id
+    ) {
       skipped.push(findingId);
       continue;
     }
@@ -504,11 +594,23 @@ export async function applyFindingsAction(
     title: content.title,
     platforms: content.platforms ?? [],
     sections: [...sectionMap.values()].map(
-      ({ type, body, image_path, alt_text, position }) => ({
+      ({
         type,
         body,
         image_path,
         alt_text,
+        image_role,
+        image_meta,
+        placed_background,
+        position,
+      }) => ({
+        type,
+        body,
+        image_path,
+        alt_text,
+        image_role,
+        image_meta,
+        placed_background,
         position,
       })
     ),
@@ -626,6 +728,9 @@ export async function applyFindingsAction(
       body: section.body,
       image_path: section.image_path,
       alt_text: section.alt_text,
+      image_role: section.image_role,
+      image_meta: section.image_meta,
+      placed_background: section.placed_background,
       position: section.position,
     })),
     warning,

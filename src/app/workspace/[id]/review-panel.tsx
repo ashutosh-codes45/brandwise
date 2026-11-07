@@ -14,6 +14,7 @@ import {
   CommentThread,
 } from "./comments-panel";
 import type { ContentComment } from "./comment-actions";
+import { markManualFindingFixedAction } from "./review-actions";
 
 type AppliedSection = {
   id: string;
@@ -21,6 +22,9 @@ type AppliedSection = {
   body: string | null;
   image_path: string | null;
   alt_text: string | null;
+  image_role: "logo" | "graphic" | "photo" | null;
+  image_meta: import("@/lib/visual/analyze-image").ImageAnalysis | null;
+  placed_background: string | null;
   position: number;
 };
 
@@ -74,6 +78,9 @@ export function ReviewPanel({
   const [isError, setIsError] = useState(false);
   const [isPending, startTransition] = useTransition();
   const openFindings = findings.filter((finding) => finding.status === "open");
+  const applicableFindings = openFindings.filter(
+    (finding) => finding.suggestion_kind !== "manual"
+  );
   const resolvedFindings = findings.filter(
     (finding) => finding.status === "applied" || finding.status === "dismissed"
   );
@@ -126,6 +133,7 @@ export function ReviewPanel({
               ...finding,
                 run_id: result.runId,
                 status: "open",
+                suggestion_kind: finding.suggestion_kind ?? "text",
                 note: finding.note,
                 source: null,
                 events: [],
@@ -155,7 +163,11 @@ export function ReviewPanel({
   function selectAllBlockers() {
     setSelectedIds(
       openFindings
-        .filter((finding) => finding.severity === "blocker")
+        .filter(
+          (finding) =>
+            finding.severity === "blocker" &&
+            finding.suggestion_kind !== "manual"
+        )
         .map((finding) => finding.id)
     );
   }
@@ -166,7 +178,10 @@ export function ReviewPanel({
       setIsError(true);
       return;
     }
-    if (selectedIds.length === 0) {
+    const applicableIds = selectedIds.filter((id) =>
+      applicableFindings.some((finding) => finding.id === id)
+    );
+    if (applicableIds.length === 0) {
       setFeedback("Select at least one finding to apply.");
       setIsError(true);
       return;
@@ -175,7 +190,7 @@ export function ReviewPanel({
     startTransition(async () => {
       const result = await applyFindingsAction(
         contentId,
-        selectedIds,
+        applicableIds,
         overrides
       );
       if ("error" in result) {
@@ -190,6 +205,20 @@ export function ReviewPanel({
       );
       setIsError(Boolean(result.warning));
       setSelectedIds([]);
+      loadLatest();
+    });
+  }
+
+  function markManualFixed(findingId: string) {
+    startTransition(async () => {
+      const result = await markManualFindingFixedAction(findingId);
+      if ("error" in result) {
+        setFeedback(result.error);
+        setIsError(true);
+        return;
+      }
+      setFeedback("Finding marked as fixed.");
+      setIsError(false);
       loadLatest();
     });
   }
@@ -369,7 +398,7 @@ export function ReviewPanel({
           </p>
         )}
 
-        {editable && openFindings.length > 0 && (
+        {editable && applicableFindings.length > 0 && (
           <div className="mt-4 flex flex-wrap gap-2">
             <button
               className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
@@ -381,7 +410,13 @@ export function ReviewPanel({
             </button>
             <button
               className="rounded-md bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-              disabled={isPending || unsavedChanges || selectedIds.length === 0}
+              disabled={
+                isPending ||
+                unsavedChanges ||
+                !selectedIds.some((id) =>
+                  applicableFindings.some((finding) => finding.id === id)
+                )
+              }
               title={
                 unsavedChanges
                   ? "Save your changes before applying suggestions."
@@ -407,7 +442,7 @@ export function ReviewPanel({
               key={finding.id}
             >
               <div className="flex flex-wrap items-center gap-2">
-                {editable && (
+                {editable && finding.suggestion_kind !== "manual" && (
                   <input
                     aria-label="Select finding for application"
                     checked={selectedIds.includes(finding.id)}
@@ -506,7 +541,7 @@ export function ReviewPanel({
                 {finding.note && (
                   <p className="mt-1 text-xs text-violet-700">{finding.note}</p>
                 )}
-                {editable ? (
+                {editable && finding.suggestion_kind !== "manual" ? (
                   <textarea
                     className="mt-2 min-h-20 w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-800"
                     disabled={isPending}
@@ -543,7 +578,16 @@ export function ReviewPanel({
                 </div>
               </details>
 
-              {editable && (
+              {editable && finding.suggestion_kind === "manual" ? (
+                <button
+                  className="mt-3 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                  disabled={isPending}
+                  onClick={() => markManualFixed(finding.id)}
+                  type="button"
+                >
+                  Mark as fixed
+                </button>
+              ) : editable ? (
                 <>
                   <label className="mt-3 block text-xs font-semibold text-zinc-600">
                     Refine with AI
@@ -597,7 +641,7 @@ export function ReviewPanel({
                     Dismiss
                   </button>
                 </>
-              )}
+              ) : null}
 
               <details className="mt-3 border-t border-zinc-100 pt-2">
                 <summary className="cursor-pointer text-xs font-medium text-zinc-600">

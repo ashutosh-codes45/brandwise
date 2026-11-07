@@ -5,6 +5,9 @@ export type ReviewSection = {
   type: "text" | "image";
   body: string | null;
   alt_text: string | null;
+  image_role: "logo" | "graphic" | "photo" | null;
+  image_meta: import("@/lib/visual/analyze-image").ImageAnalysis | null;
+  placed_background: string | null;
 };
 
 export type VaultSource = {
@@ -39,6 +42,7 @@ export type ReviewFinding = {
   rule_id: string | null;
   confidence: number | null;
   suggestion_origin: "ai" | "correction_history" | "human";
+  suggestion_kind?: "text" | "manual";
   recommended_from_correction_id: string | null;
   note: string | null;
 };
@@ -72,6 +76,7 @@ export type ReviewFindingState = {
   rule_id: string | null;
   confidence: number | null;
   suggestion_origin: string | null;
+  suggestion_kind: "text" | "manual";
   recommended_from_correction_id: string | null;
   note: string | null;
   source: {

@@ -17,11 +17,13 @@ export function AppNav({
         ]
       : member.role === "reviewer"
         ? [
+            { href: "/vault", label: "Vault" },
             { href: "/review", label: "Review queue" },
             { href: "/workspace", label: "Workspace" },
             { href: "/insights", label: "Insights" },
           ]
         : [
+            { href: "/vault", label: "Vault" },
             { href: "/workspace", label: "Workspace" },
             { href: "/insights", label: "Insights" },
           ];

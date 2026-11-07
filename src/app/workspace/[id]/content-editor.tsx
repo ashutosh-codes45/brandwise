@@ -36,6 +36,10 @@ import {
 import { WorkflowBar } from "./workflow-bar";
 import { ImportDocumentDialog } from "./import-document-dialog";
 import type { MemberRole } from "@/lib/auth/roles";
+import type { BrandKit } from "@/lib/context/brand-kit";
+import type { ImageAnalysis } from "@/lib/visual/analyze-image";
+import { analyzeImage } from "@/lib/visual/analyze-image";
+import { evaluateImage } from "@/lib/visual/evaluate";
 
 const platforms = [
   "LinkedIn",
@@ -53,6 +57,9 @@ type ContentSection = {
   body: string | null;
   image_path: string | null;
   alt_text: string | null;
+  image_role: "logo" | "graphic" | "photo" | null;
+  image_meta: ImageAnalysis | null;
+  placed_background: string | null;
   position: number;
 };
 type ContentData = {
@@ -72,6 +79,7 @@ const statusLabels: Record<string, string> = {
 
 export function ContentEditor({
   content,
+  brandKit,
   canEdit,
   initialFindings,
   initialStats,
@@ -85,6 +93,7 @@ export function ContentEditor({
   approvedBy,
 }: {
   content: ContentData;
+  brandKit: BrandKit | null;
   canEdit: boolean;
   initialFindings: ReviewFindingState[];
   initialStats: Record<string, unknown> | null;
@@ -221,6 +230,9 @@ export function ContentEditor({
         body: type === "text" ? "<p></p>" : null,
         image_path: null,
         alt_text: null,
+        image_role: type === "image" ? "photo" : null,
+        image_meta: null,
+        placed_background: null,
         position: current.length,
       },
     ]);
@@ -245,6 +257,9 @@ export function ContentEditor({
       body: section.html,
       image_path: null,
       alt_text: null,
+      image_role: null,
+      image_meta: null,
+      placed_background: null,
       position: existingSections.length + index,
     }));
 
@@ -354,6 +369,9 @@ export function ContentEditor({
       body: string | null;
       image_path: string | null;
       alt_text: string | null;
+      image_role: "logo" | "graphic" | "photo" | null;
+      image_meta: ImageAnalysis | null;
+      placed_background: string | null;
       position: number;
     }>
   ) {
@@ -548,13 +566,17 @@ export function ContentEditor({
                 canEdit={canEdit}
                 contentId={content.id}
                 imagePath={section.image_path}
+                imageRole={section.image_role ?? "photo"}
+                imageMeta={section.image_meta}
+                placedBackground={section.placed_background}
+                brandKit={brandKit}
                 imageUrl={imageUrls[section.id]}
                 isPending={isPending}
                 onAltTextChange={(alt_text) =>
                   updateSection(section.id, { alt_text })
                 }
-                onImageChange={(image_path, imageUrl) => {
-                  updateSection(section.id, { image_path });
+                onImageChange={(image_path, imageUrl, image_meta) => {
+                  updateSection(section.id, { image_path, image_meta });
                   if (imageUrl) {
                     setImageUrls((current) => ({
                       ...current,
@@ -562,6 +584,12 @@ export function ContentEditor({
                     }));
                   }
                 }}
+                onImageRoleChange={(image_role) =>
+                  updateSection(section.id, { image_role })
+                }
+                onPlacedBackgroundChange={(placed_background) =>
+                  updateSection(section.id, { placed_background })
+                }
               />
             )}
           </article>
@@ -865,19 +893,31 @@ function ImageSection({
   canEdit,
   contentId,
   imagePath,
+  imageRole,
+  imageMeta,
+  placedBackground,
+  brandKit,
   imageUrl,
   isPending,
   onAltTextChange,
   onImageChange,
+  onImageRoleChange,
+  onPlacedBackgroundChange,
 }: {
   altText: string;
   canEdit: boolean;
   contentId: string;
   imagePath: string | null;
+  imageRole: "logo" | "graphic" | "photo";
+  imageMeta: ImageAnalysis | null;
+  placedBackground: string | null;
+  brandKit: BrandKit | null;
   imageUrl?: string;
   isPending: boolean;
   onAltTextChange: (value: string) => void;
-  onImageChange: (path: string, url?: string) => void;
+  onImageChange: (path: string, url: string | undefined, imageMeta: ImageAnalysis) => void;
+  onImageRoleChange: (role: "logo" | "graphic" | "photo") => void;
+  onPlacedBackgroundChange: (value: string | null) => void;
 }) {
   const [error, setError] = useState("");
   const [uploadPending, startUpload] = useTransition();
@@ -889,14 +929,28 @@ function ImageSection({
     }
     setError("");
     startUpload(async () => {
+      let analysis: ImageAnalysis;
+      try {
+        analysis = await analyzeImage(file);
+      } catch (error) {
+        setError(
+          error instanceof Error ? error.message : "Could not analyze this image."
+        );
+        return;
+      }
       const result = await uploadImage(contentId, file);
       if ("error" in result) {
         setError(result.error);
       } else {
-        onImageChange(result.path, result.url);
+        onImageChange(result.path, result.url, analysis);
       }
     });
   }
+
+  const checks =
+    brandKit && imageMeta
+      ? evaluateImage(imageMeta, imageRole, placedBackground, brandKit)
+      : [];
 
   return (
     <div className="space-y-4">
@@ -933,6 +987,94 @@ function ImageSection({
       )}
       {imagePath && !imageUrl && (
         <p className="text-sm text-zinc-500">Loading image preview...</p>
+      )}
+      {canEdit ? (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label
+              className="mb-1.5 block text-sm font-medium text-zinc-700"
+              htmlFor={`image-role-${contentId}-${imagePath ?? "new"}`}
+            >
+              Image role
+            </label>
+            <select
+              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-zinc-900"
+              id={`image-role-${contentId}-${imagePath ?? "new"}`}
+              onChange={(event) => {
+                const role = event.target.value;
+                if (role === "logo" || role === "graphic" || role === "photo") {
+                  onImageRoleChange(role);
+                }
+              }}
+              value={imageRole}
+            >
+              <option value="logo">Logo</option>
+              <option value="graphic">Brand graphic</option>
+              <option value="photo">Photo</option>
+            </select>
+          </div>
+          <div>
+            <label
+              className="mb-1.5 block text-sm font-medium text-zinc-700"
+              htmlFor={`image-background-${contentId}-${imagePath ?? "new"}`}
+            >
+              Placed on background colour (optional)
+            </label>
+            <input
+              className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-zinc-900"
+              id={`image-background-${contentId}-${imagePath ?? "new"}`}
+              maxLength={7}
+              onChange={(event) =>
+                onPlacedBackgroundChange(event.target.value || null)
+              }
+              pattern="^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
+              placeholder="#ffffff"
+              type="text"
+              value={placedBackground ?? ""}
+            />
+          </div>
+        </div>
+      ) : (
+        <p className="text-sm text-zinc-600">
+          Image role: {imageRole === "graphic" ? "Brand graphic" : imageRole}
+          {placedBackground && ` · Background ${placedBackground}`}
+        </p>
+      )}
+      {imageMeta && (
+        <div className="space-y-2">
+          {checks.length ? (
+            <ul aria-label="Visual check results" className="flex flex-wrap gap-2">
+              {checks.map((check) => (
+                <li
+                  className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                    check.status === "pass"
+                      ? "bg-emerald-100 text-emerald-800"
+                      : check.status === "fail"
+                        ? "bg-red-100 text-red-800"
+                        : "bg-zinc-100 text-zinc-600"
+                  }`}
+                  key={check.id}
+                  title={check.message}
+                >
+                  {check.id.replaceAll("_", " ")}:{" "}
+                  {check.status === "pass"
+                    ? "Pass"
+                    : check.status === "fail"
+                      ? "Check"
+                      : "Skipped"}
+                </li>
+              ))}
+            </ul>
+          ) : !brandKit && imageRole !== "photo" ? (
+            <p className="text-xs text-amber-700">
+              No Brand kit set up; visual checks are skipped.
+            </p>
+          ) : null}
+          <p className="text-xs text-zinc-500">
+            {imageMeta.width} × {imageMeta.height}px · {imageMeta.format}
+            {imageMeta.hasTransparency ? " · transparent" : ""}
+          </p>
+        </div>
       )}
       {canEdit ? (
         <div>

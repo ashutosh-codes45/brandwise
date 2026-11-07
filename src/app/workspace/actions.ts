@@ -21,6 +21,15 @@ type ContentSection = {
   body: string | null;
   image_path: string | null;
   alt_text: string | null;
+  image_role: "logo" | "graphic" | "photo" | null;
+  image_meta: {
+    width: number;
+    height: number;
+    format: string;
+    hasTransparency: boolean;
+    dominantColors: { hex: string; share: number }[];
+  } | null;
+  placed_background: string | null;
   position: number;
 };
 type WorkspaceContext =
@@ -182,6 +191,62 @@ function validateSections(value: unknown, orgId: string, contentId: string):
       ) {
         return { error: "Alt text is required for every image section." };
       }
+      if (
+        section.image_role !== null &&
+        section.image_role !== undefined &&
+        section.image_role !== "logo" &&
+        section.image_role !== "graphic" &&
+        section.image_role !== "photo"
+      ) {
+        return { error: "Choose a valid image role." };
+      }
+      if (
+        section.placed_background !== null &&
+        section.placed_background !== undefined &&
+        (typeof section.placed_background !== "string" ||
+          !/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(section.placed_background))
+      ) {
+        return { error: "Enter a valid placed background colour." };
+      }
+      if (
+        section.image_meta !== null &&
+        section.image_meta !== undefined &&
+        (typeof section.image_meta !== "object" ||
+          section.image_meta === null ||
+          !("width" in section.image_meta) ||
+          typeof section.image_meta.width !== "number" ||
+          !Number.isFinite(section.image_meta.width) ||
+          section.image_meta.width <= 0 ||
+          section.image_meta.width > 100_000 ||
+          !("height" in section.image_meta) ||
+          typeof section.image_meta.height !== "number" ||
+          !Number.isFinite(section.image_meta.height) ||
+          section.image_meta.height <= 0 ||
+          section.image_meta.height > 100_000 ||
+          !("format" in section.image_meta) ||
+          typeof section.image_meta.format !== "string" ||
+          section.image_meta.format.length > 20 ||
+          !("hasTransparency" in section.image_meta) ||
+          typeof section.image_meta.hasTransparency !== "boolean" ||
+          !("dominantColors" in section.image_meta) ||
+          !Array.isArray(section.image_meta.dominantColors) ||
+          section.image_meta.dominantColors.length > 5 ||
+          !section.image_meta.dominantColors.every(
+            (colour: unknown) =>
+              typeof colour === "object" &&
+              colour !== null &&
+              "hex" in colour &&
+              typeof colour.hex === "string" &&
+              /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(colour.hex) &&
+              "share" in colour &&
+              typeof colour.share === "number" &&
+              Number.isFinite(colour.share) &&
+              colour.share >= 0 &&
+              colour.share <= 1
+          ))
+      ) {
+        return { error: "Image analysis data is invalid. Re-upload the image and try again." };
+      }
     } else if (section.image_path !== null && section.image_path !== undefined) {
       return { error: "Text sections cannot reference an image." };
     }
@@ -195,6 +260,25 @@ function validateSections(value: unknown, orgId: string, contentId: string):
       alt_text:
         section.type === "image"
           ? (section.alt_text as string).trim()
+          : null,
+      image_role:
+        section.type === "image"
+          ? section.image_role === "logo" ||
+            section.image_role === "graphic" ||
+            section.image_role === "photo"
+            ? section.image_role
+            : "photo"
+          : null,
+      image_meta:
+        section.type === "image" &&
+        typeof section.image_meta === "object" &&
+        section.image_meta !== null
+          ? section.image_meta
+          : null,
+      placed_background:
+        section.type === "image" &&
+        typeof section.placed_background === "string"
+          ? section.placed_background
           : null,
       position,
     });
@@ -278,6 +362,9 @@ export async function createContent(
       body: "",
       image_path: null,
       alt_text: null,
+      image_role: null,
+      image_meta: null,
+      placed_background: null,
     });
 
   if (sectionError) {
@@ -421,11 +508,23 @@ export async function saveContent(
   }
 
   const sectionSnapshot = validatedSections.sections.map(
-    ({ type, body, image_path, alt_text, position }) => ({
+    ({
       type,
       body,
       image_path,
       alt_text,
+      image_role,
+      image_meta,
+      placed_background,
+      position,
+    }) => ({
+      type,
+      body,
+      image_path,
+      alt_text,
+      image_role,
+      image_meta,
+      placed_background,
       position,
     })
   );

@@ -7,6 +7,8 @@ import { filterAiFindings } from "./filter";
 import { judgeSections, PROMPT_VERSION, type JudgeFinding } from "./judge";
 import { retrieveVaultSources } from "./retrieve";
 import { runRuleChecks } from "./rules";
+import { getBrandKit } from "@/lib/context/get-brand-kit";
+import { evaluateImage, isImageAnalysis } from "@/lib/visual/evaluate";
 import {
   dailyAiCallLimit,
   getAiUsage,
@@ -192,7 +194,7 @@ async function runReviewPipeline(
 
   const { data: dbSections, error: sectionError } = await supabase
     .from("content_sections")
-    .select("id, type, body, alt_text")
+    .select("id, type, body, alt_text, image_role, image_meta, placed_background")
     .eq("org_id", membership.org_id)
     .eq("content_id", content.id)
     .order("position", { ascending: true });
@@ -205,6 +207,14 @@ async function runReviewPipeline(
     type: section.type === "image" ? "image" : "text",
     body: section.body,
     alt_text: section.alt_text,
+    image_role:
+      section.image_role === "logo" ||
+      section.image_role === "graphic" ||
+      section.image_role === "photo"
+        ? section.image_role
+        : null,
+    image_meta: isImageAnalysis(section.image_meta) ? section.image_meta : null,
+    placed_background: section.placed_background,
   }));
   if (sections.length === 0) {
     throw new Error("Save at least one section before running a review.");
@@ -260,7 +270,7 @@ async function runReviewPipeline(
         });
       }
     }
-    return runRuleChecks(sections, [...allSources.values()]).map((finding) => {
+    const textRules = runRuleChecks(sections, [...allSources.values()]).map((finding) => {
       const source = finding.source_item_id
         ? allSources.get(finding.source_item_id)
         : undefined;
@@ -269,6 +279,73 @@ async function runReviewPipeline(
         source_quote: source?.is_confidential ? null : finding.source_quote,
       };
     });
+    const visualSections = sections.filter(
+      (section) =>
+        section.type === "image" &&
+        section.image_role !== "photo" &&
+        section.image_meta
+    );
+    if (visualSections.length === 0) {
+      return textRules;
+    }
+
+    const brandKit = await getBrandKit(membership.org_id);
+    if (!brandKit) {
+      return [
+        ...textRules,
+        {
+          section_id: visualSections[0].id,
+          category: "visual" as const,
+          severity: "info" as const,
+          excerpt: "Brand kit",
+          reason: "No Brand kit set up: visual checks skipped.",
+          source_item_id: null,
+          source_label: "Brand kit",
+          source_quote: null,
+          suggestion: "Set up a Brand kit in the Vault to enable visual checks.",
+          origin: "rule" as const,
+          rule_id: "visual_brand_kit_missing",
+          confidence: null,
+          suggestion_origin: "human" as const,
+          suggestion_kind: "manual" as const,
+          recommended_from_correction_id: null,
+          note: null,
+        },
+      ];
+    }
+
+    const visualFindings = visualSections.flatMap((section) => {
+      if (!section.image_meta || !section.image_role) {
+        return [];
+      }
+      const position = sections.findIndex((entry) => entry.id === section.id);
+      return evaluateImage(
+        section.image_meta,
+        section.image_role,
+        section.placed_background,
+        brandKit.kit
+      )
+        .filter((check) => check.status === "fail")
+        .map((check) => ({
+          section_id: section.id,
+          category: "visual" as const,
+          severity: check.severity,
+          excerpt: `Image ${position + 1}`,
+          reason: check.message,
+          source_item_id: brandKit.id,
+          source_label: "Brand kit",
+          source_quote: check.kitRule,
+          suggestion: `Update this image to follow the Brand kit rule: ${check.kitRule}`,
+          origin: "rule" as const,
+          rule_id: check.id,
+          confidence: null,
+          suggestion_origin: "human" as const,
+          suggestion_kind: "manual" as const,
+          recommended_from_correction_id: null,
+          note: null,
+        }));
+    });
+    return [...textRules, ...visualFindings];
   });
 
   let candidates: JudgeFinding[] = [];
@@ -380,6 +457,7 @@ async function runReviewPipeline(
     rule_id: finding.rule_id,
     confidence: finding.confidence,
     suggestion_origin: finding.suggestion_origin,
+    suggestion_kind: finding.suggestion_kind ?? "text",
     recommended_from_correction_id:
       finding.recommended_from_correction_id,
     run_id: run.id,
@@ -404,7 +482,7 @@ async function runReviewPipeline(
     .from("findings")
     .insert(rows)
     .select(
-      "id, section_id, category, severity, excerpt, reason, source_item_id, source_label, source_quote, suggestion, origin, rule_id, confidence, suggestion_origin, recommended_from_correction_id"
+      "id, section_id, category, severity, excerpt, reason, source_item_id, source_label, source_quote, suggestion, origin, rule_id, confidence, suggestion_origin, suggestion_kind, recommended_from_correction_id"
     );
 
   if (findingsError) {
@@ -453,6 +531,7 @@ async function runReviewPipeline(
       finding.suggestion_origin === "human"
         ? finding.suggestion_origin
         : "ai" as const,
+    suggestion_kind: finding.suggestion_kind,
     rule_id: finding.rule_id,
     confidence: finding.confidence,
     recommended_from_correction_id:

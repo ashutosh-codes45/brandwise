@@ -18,6 +18,8 @@ import {
   reindexVault,
   updateItem,
 } from "./actions";
+import { BrandKitPanel } from "./brand-kit-panel";
+import type { BrandKit } from "@/lib/context/brand-kit";
 
 const kinds = ["guideline", "fact", "term", "asset"] as const;
 type VaultKind = (typeof kinds)[number];
@@ -44,16 +46,23 @@ const kindLabels: Record<VaultKind, string> = {
 export function VaultManager({
   items,
   initialEditingItemId,
+  brandKit,
+  canManage,
 }: {
   items: VaultItem[];
   initialEditingItemId?: string;
+  brandKit: { id: string; kit: BrandKit; body: string } | null;
+  canManage: boolean;
 }) {
   const router = useRouter();
-  const [activeKind, setActiveKind] = useState<VaultKind>("guideline");
+  const [activeKind, setActiveKind] = useState<VaultKind | "brand-kit">("guideline");
   const [search, setSearch] = useState("");
   const [selectedTag, setSelectedTag] = useState("");
   const [editingItem, setEditingItem] = useState<VaultItem | null>(
-    () => items.find((item) => item.id === initialEditingItemId) ?? null
+    () =>
+      canManage
+        ? items.find((item) => item.id === initialEditingItemId) ?? null
+        : null
   );
   const [isAdding, setIsAdding] = useState(false);
   const [feedback, setFeedback] = useState("");
@@ -70,7 +79,7 @@ export function VaultManager({
   const visibleItems = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
     return items.filter((item) => {
-      if (item.kind !== activeKind) {
+      if (item.tags.includes("brand-kit") || item.kind !== activeKind) {
         return false;
       }
       if (selectedTag && !item.tags.includes(selectedTag)) {
@@ -236,10 +245,12 @@ export function VaultManager({
             Brand Vault
           </h1>
           <p className="mt-2 text-sm text-zinc-600">
-            Manage the guidelines, facts, terminology, and assets your team can use.
+            {canManage
+              ? "Manage the guidelines, facts, terminology, and assets your team can use."
+              : "View shared brand guidelines, facts, terminology, assets, and the Brand kit."}
           </p>
         </div>
-        <div className="flex flex-wrap gap-3">
+        {canManage && <div className="flex flex-wrap gap-3">
           <button
             className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
             disabled={isPending}
@@ -256,23 +267,25 @@ export function VaultManager({
           >
             Re-index Vault
           </button>
-          <button
-            className="rounded-lg bg-indigo-600 px-4 py-2.5 font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-            disabled={isPending}
-            onClick={() => {
-              setEditingItem(null);
-              setIsAdding(true);
-            }}
-            type="button"
-          >
-            Add {activeKind === "asset" ? "asset" : activeKind}
-          </button>
-        </div>
+          {activeKind !== "brand-kit" && (
+            <button
+              className="rounded-lg bg-indigo-600 px-4 py-2.5 font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              disabled={isPending}
+              onClick={() => {
+                setEditingItem(null);
+                setIsAdding(true);
+              }}
+              type="button"
+            >
+              Add {activeKind === "asset" ? "asset" : activeKind}
+            </button>
+          )}
+        </div>}
       </div>
 
       <div className="mt-7 border-b border-zinc-200">
-        <nav aria-label="Vault item kinds" className="-mb-px flex gap-6 overflow-x-auto">
-          {kinds.map((kind) => (
+        <nav aria-label="Vault sections" className="-mb-px flex gap-6 overflow-x-auto">
+          {[...kinds, "brand-kit" as const].map((kind) => (
             <button
               aria-current={activeKind === kind ? "page" : undefined}
               className={`whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium ${
@@ -287,12 +300,20 @@ export function VaultManager({
               }}
               type="button"
             >
-              {kindLabels[kind]}
+              {kind === "brand-kit" ? "Brand kit" : kindLabels[kind]}
             </button>
           ))}
         </nav>
       </div>
 
+      {activeKind === "brand-kit" ? (
+        <BrandKitPanel
+          canManage={canManage}
+          initialKit={brandKit?.kit ?? null}
+          renderedRules={brandKit?.body ?? ""}
+        />
+      ) : (
+      <>
       <div className="mt-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
         <div>
           <label className="sr-only" htmlFor="vaultSearch">
@@ -391,7 +412,7 @@ export function VaultManager({
                 ))}
               </ul>
             )}
-            <div className="mt-5 flex gap-3 border-t border-zinc-100 pt-4">
+            {canManage && <div className="mt-5 flex gap-3 border-t border-zinc-100 pt-4">
               <button
                 className="text-sm font-medium text-indigo-600 hover:text-indigo-700"
                 onClick={() => {
@@ -410,7 +431,7 @@ export function VaultManager({
               >
                 Delete
               </button>
-            </div>
+            </div>}
           </article>
         ))}
         {visibleItems.length === 0 && (
@@ -437,6 +458,8 @@ export function VaultManager({
               : undefined
           }
         />
+      )}
+      </>
       )}
     </div>
   );

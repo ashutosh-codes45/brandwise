@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { embedVaultItems } from "@/lib/ai/embed-vault";
 import { extractText } from "@/lib/extract-text";
 import { createClient } from "@/lib/supabase/server";
+import { brandKitSchema, renderBrandKitText } from "@/lib/context/brand-kit";
 
 const kinds = ["guideline", "fact", "term", "asset"] as const;
 type VaultKind = (typeof kinds)[number];
@@ -349,6 +350,93 @@ export async function createItem(
   return { warning: [warning, embeddingWarning].filter(Boolean).join(" ") || undefined };
 }
 
+export async function saveBrandKit(
+  value: unknown
+): Promise<{ error: string } | { success: true }> {
+  const parsed = brandKitSchema.safeParse(value);
+  if (!parsed.success) {
+    return {
+      error: `Brand kit is invalid: ${parsed.error.issues
+        .map((issue) => issue.message)
+        .join(" ")}`,
+    };
+  }
+
+  const context = await getManagerContext();
+  if (!context.ok) {
+    return { error: context.error };
+  }
+
+  const body = renderBrandKitText(parsed.data);
+  const { data: existing, error: lookupError } = await context.supabase
+    .from("vault_items")
+    .select("id")
+    .eq("org_id", context.orgId)
+    .contains("tags", ["brand-kit"])
+    .maybeSingle();
+  if (lookupError) {
+    return { error: lookupError.message };
+  }
+
+  const values = {
+    org_id: context.orgId,
+    kind: "guideline" as const,
+    title: "Brand kit",
+    body,
+    structured: parsed.data,
+    tags: ["brand-kit"],
+    is_confidential: false,
+    created_by: context.userId,
+  };
+  const result = existing
+    ? await context.supabase
+        .from("vault_items")
+        .update({
+          kind: values.kind,
+          title: values.title,
+          body,
+          structured: parsed.data,
+          tags: values.tags,
+          is_confidential: false,
+          asset_path: null,
+          asset_meta: null,
+          image_role: null,
+          owner: null,
+          valid_until: null,
+        })
+        .eq("id", existing.id)
+        .eq("org_id", context.orgId)
+        .select("id")
+        .single()
+    : await context.supabase
+        .from("vault_items")
+        .insert(values)
+        .select("id")
+        .single();
+
+  if (result.error) {
+    return { error: `Could not save the Brand kit: ${result.error.message}` };
+  }
+  revalidatePath("/vault");
+
+  try {
+    await embedVaultItems(
+      context.supabase,
+      [{ id: result.data.id, title: values.title, tags: values.tags, body }],
+      context.orgId
+    );
+  } catch (error) {
+    return {
+      error: `Brand kit saved, but its search embedding could not be created: ${
+        error instanceof Error ? error.message : "unknown error"
+      }`,
+    };
+  }
+
+  revalidatePath("/vault");
+  return { success: true };
+}
+
 export async function updateItem(
   formData: FormData
 ): Promise<{ error: string } | { warning?: string }> {
@@ -533,15 +621,45 @@ export async function getSignedUrl(
     return { error: "Select a valid vault file." };
   }
 
-  const context = await getManagerContext();
-  if (!context.ok) {
-    return { error: context.error };
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+  if (userError) {
+    return { error: userError.message };
   }
-  if (!path.startsWith(`${context.orgId}/`)) {
+  if (!user) {
+    return { error: "Sign in to view Vault assets." };
+  }
+  const { data: membership, error: membershipError } = await supabase
+    .from("members")
+    .select("org_id")
+    .eq("user_id", user.id)
+    .limit(1)
+    .maybeSingle();
+  if (membershipError) {
+    return { error: membershipError.message };
+  }
+  if (!membership || !path.startsWith(`${membership.org_id}/`)) {
     return { error: "Vault file not found." };
   }
 
-  const { data, error } = await context.supabase.storage
+  const { data: item, error: itemError } = await supabase
+    .from("vault_items")
+    .select("id")
+    .eq("org_id", membership.org_id)
+    .eq("kind", "asset")
+    .eq("asset_path", path)
+    .maybeSingle();
+  if (itemError) {
+    return { error: itemError.message };
+  }
+  if (!item) {
+    return { error: "Vault file not found or you do not have permission to view it." };
+  }
+
+  const { data, error } = await supabase.storage
     .from(bucket)
     .createSignedUrl(path, 60 * 60);
 

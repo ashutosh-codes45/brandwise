@@ -9,6 +9,7 @@ import { ContentEditor } from "./content-editor";
 import { getReviewState } from "./review-actions";
 import type { ContentComment } from "./comment-actions";
 import type { ContentActivityEvent } from "./activity-panel";
+import { getBrandKit } from "@/lib/context/get-brand-kit";
 
 export const instant = false;
 export const maxDuration = 60;
@@ -75,7 +76,7 @@ async function ContentPageContent({ params }: ContentPageProps) {
 
   const { data: sections, error: sectionsError } = await supabase
     .from("content_sections")
-    .select("id, type, body, image_path, alt_text, position")
+    .select("id, type, body, image_path, alt_text, image_role, image_meta, placed_background, position")
     .eq("org_id", content.org_id)
     .eq("content_id", content.id)
     .order("position", { ascending: true });
@@ -87,6 +88,7 @@ async function ContentPageContent({ params }: ContentPageProps) {
   const canEdit =
     content.created_by === member.userId &&
     (content.status === "draft" || content.status === "changes_requested");
+  const brandKit = await getBrandKit(content.org_id);
   const reviewState = await getReviewState(content.id);
 
   if ("error" in reviewState) {
@@ -126,6 +128,7 @@ async function ContentPageContent({ params }: ContentPageProps) {
         </Link>
       </div>
       <ContentEditor
+        brandKit={brandKit?.kit ?? null}
         content={{
           id: content.id,
           title: content.title,
